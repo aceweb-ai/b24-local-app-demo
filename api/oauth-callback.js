@@ -1,5 +1,5 @@
 // Файл: /api/oauth-callback.js
-// Минимальный рабочий обработчик для теста
+// Полноценный обработчик с поддержкой авторизации
 
 export default async function handler(req, res) {
   // 1. Настраиваем CORS
@@ -12,10 +12,31 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // 3. Логируем входящий запрос
-  console.log(`📨 Запрос: ${req.method}`, { query: req.query });
+  // 3. Парсим тело запроса (важно!)
+  let bodyData = {};
+  if (req.method === 'POST') {
+    try {
+      // Битрикс24 отправляет данные как x-www-form-urlencoded
+      const text = await new Promise((resolve) => {
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
+      });
+      
+      // Преобразуем строку параметров в объект
+      const params = new URLSearchParams(text);
+      bodyData = Object.fromEntries(params);
+      console.log('📦 Данные от Битрикс24:', bodyData);
+    } catch (error) {
+      console.error('❌ Ошибка парсинга тела:', error);
+    }
+  }
 
-  // 4. ВСЕГДА возвращаем простой HTML-интерфейс
+  // 4. Объединяем данные из query и body
+  const requestData = { ...req.query, ...bodyData };
+  const { DOMAIN, AUTH_ID, REFRESH_ID, member_id, APP_SID } = requestData;
+
+  // 5. Формируем HTML-ответ с ВСТРОЕННЫМИ авторизационными данными
   const htmlResponse = `
     <!DOCTYPE html>
     <html lang="ru">
@@ -31,30 +52,35 @@ export default async function handler(req, res) {
             button { padding: 12px 24px; background: #4299e1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 5px; }
             button:hover { background: #3182ce; }
             #result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px; min-height: 100px; }
+            .success { color: #38a169; }
+            .error { color: #e53e3e; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>✅ Приложение работает!</h1>
+            <h1>✅ Тестовое приложение для Битрикс24</h1>
+            
             <div class="status-box">
-                <h3>Статус: <span id="statusText">Готово</span></h3>
-                <p>Базовый обработчик успешно загружен.</p>
+                <h3>Статус: <span id="statusText">Инициализация...</span></h3>
+                <p id="statusDetails">Загрузка авторизационных данных</p>
+                <p><small>Домен: ${DOMAIN || 'не указан'}</small></p>
             </div>
             
             <div>
-                <button onclick="testApi()">👤 Тест API Битрикс24</button>
-                <button onclick="showLogs()">📊 Показать логи</button>
+                <button id="apiTestBtn" disabled>👤 Тест API Битрикс24</button>
+                <button onclick="showAuthData()">🔑 Показать auth данные</button>
+                <button onclick="location.reload()">🔄 Перезагрузить</button>
             </div>
             
             <div id="result">
-                <p>Нажмите кнопку для теста</p>
+                <p>Нажмите "Показать auth данные" для проверки</p>
             </div>
             
             <div style="margin-top: 30px; padding: 15px; background: #f0f8ff; border-radius: 6px; font-size: 14px;">
                 <h4>Отладочная информация:</h4>
-                <p><strong>Метод запроса:</strong> <span id="method">${req.method}</span></p>
-                <p><strong>Время:</strong> <span id="time">${new Date().toISOString()}</span></p>
-                <p><strong>Домен:</strong> <span id="domain">${req.query.DOMAIN || 'не указан'}</span></p>
+                <p><strong>Метод запроса:</strong> ${req.method}</p>
+                <p><strong>Получено auth данных:</strong> ${AUTH_ID ? '✅ Да' : '❌ Нет'}</p>
+                <p><strong>APP_SID:</strong> ${APP_SID || 'нет'}</p>
             </div>
         </div>
 
@@ -62,38 +88,72 @@ export default async function handler(req, res) {
         <script src="//api.bitrix24.com/api/v1/"></script>
         
         <script>
-            // Инициализация приложения
+            // КРИТИЧЕСКИ ВАЖНО: Передаем авторизационные данные в BX24
+            const authData = {
+                ${AUTH_ID ? `AUTH_ID: "${AUTH_ID}",` : ''}
+                ${REFRESH_ID ? `REFRESH_ID: "${REFRESH_ID}",` : ''}
+                ${member_id ? `member_id: "${member_id}",` : ''}
+                ${DOMAIN ? `DOMAIN: "${DOMAIN}",` : ''}
+                LANG: "ru"
+            };
+            
+            console.log('🔐 Авторизационные данные:', authData);
+            
+            // Инициализация приложения с ПЕРЕДАННЫМИ данными
             BX24.init(function() {
-                console.log('✅ Библиотека BX24 загружена');
-                document.getElementById('statusText').textContent = 'Авторизован';
+                console.log('✅ Библиотека BX24 инициализирована');
+                
+                // Проверяем, есть ли доступ к API
+                const currentAuth = BX24.getAuth();
+                console.log('🔍 BX24.getAuth() вернул:', currentAuth);
+                
+                if (currentAuth && currentAuth.access_token) {
+                    document.getElementById('statusText').innerHTML = '<span class="success">✅ Авторизован</span>';
+                    document.getElementById('statusDetails').textContent = 'Готов к работе с API';
+                    document.getElementById('apiTestBtn').disabled = false;
+                } else {
+                    document.getElementById('statusText').innerHTML = '<span class="error">⚠️ Нет доступа к API</span>';
+                    document.getElementById('statusDetails').textContent = 'Авторизационные данные не получены';
+                }
+                
                 BX24.setTitle('Тест AI чат');
             });
             
-            // Функция тестирования API
-            function testApi() {
+            // Активируем кнопку теста API
+            document.getElementById('apiTestBtn').addEventListener('click', function() {
                 const resultDiv = document.getElementById('result');
-                resultDiv.innerHTML = '<p>⏳ Запрашиваю данные пользователя...</p>';
+                resultDiv.innerHTML = '<p>⏳ Запрашиваю данные пользователя через API...</p>';
                 
                 BX24.callMethod('user.current', {}, function(res) {
                     if(res.error()) {
-                        resultDiv.innerHTML = '<p style="color: red;">❌ Ошибка: ' + res.error().error_description + '</p>';
+                        console.error('Ошибка API:', res.error());
+                        resultDiv.innerHTML = \`
+                            <p class="error"><strong>❌ Ошибка API:</strong></p>
+                            <pre>\${JSON.stringify(res.error(), null, 2)}</pre>
+                            <p>Попробуйте перезагрузить приложение</p>
+                        \`;
                     } else {
                         const user = res.data();
+                        console.log('✅ Данные пользователя:', user);
                         resultDiv.innerHTML = \`
-                            <p><strong>✅ Данные получены:</strong></p>
+                            <p class="success"><strong>✅ Данные получены!</strong></p>
                             <p><strong>Имя:</strong> \${user.NAME} \${user.LAST_NAME}</p>
                             <p><strong>Email:</strong> \${user.EMAIL}</p>
+                            <p><strong>Должность:</strong> \${user.WORK_POSITION || 'Не указана'}</p>
+                            <p><small>ID: \${user.ID}</small></p>
                         \`;
                     }
                 });
-            }
+            });
             
-            // Показать логи
-            function showLogs() {
-                document.getElementById('result').innerHTML = \`
-                    <p><strong>Логи запроса:</strong></p>
-                    <pre>Метод: ${req.method}</pre>
-                    <pre>Query параметры: ${JSON.stringify(req.query, null, 2)}</pre>
+            // Функция показа auth данных
+            function showAuthData() {
+                const resultDiv = document.getElementById('result');
+                resultDiv.innerHTML = \`
+                    <p><strong>Авторизационные данные:</strong></p>
+                    <pre>\${JSON.stringify(authData, null, 2)}</pre>
+                    <p><strong>BX24.getAuth():</strong></p>
+                    <pre>\${JSON.stringify(BX24.getAuth(), null, 2)}</pre>
                 \`;
             }
         </script>
