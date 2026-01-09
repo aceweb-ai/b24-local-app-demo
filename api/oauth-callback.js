@@ -1,5 +1,5 @@
 // Файл: /api/oauth-callback.js
-// Полноценный OAuth-обработчик для Битрикс24
+// Полноценный OAuth-обработчик для Битрикс24 (рабочая версия)
 
 export default async function handler(req, res) {
   // 1. Настраиваем CORS
@@ -9,92 +9,125 @@ export default async function handler(req, res) {
 
   // 2. Обработка предварительного запроса OPTIONS
   if (req.method === 'OPTIONS') {
+    console.log('[CORS] Preflight request');
     return res.status(200).end();
   }
 
-  // 3. Обрабатываем ТОЛЬКО POST-запросы (которые присылает Битрикс24)
+  // 3. Обрабатываем POST-запросы
   if (req.method === 'POST') {
     try {
-      console.log('📨 Получен POST от Битрикс24');
+      console.log('📨 [MAIN] Получен POST запрос от Битрикс24');
       
-      // 4. Парсим данные из запроса
-      const { event, data } = req.body;
-      console.log('Event:', event, 'Data:', data);
+      // ВАЖНО: Битрикс24 может отправлять данные в теле (req.body) или в query (req.query)
+      // Логируем всё для диагностики
+      const requestData = {
+        body: req.body,
+        query: req.query,
+        headers: req.headers
+      };
+      console.log('📦 Полные данные запроса:', JSON.stringify(requestData, null, 2));
 
-      // 5. Проверяем, что это запрос на авторизацию
-      if (event === 'ONAPPINSTALL' || data?.code) {
-        const authCode = data.code;
-        const domain = data.domain || req.headers['referer']?.match(/https?:\/\/([^\/]+)/)?.[1];
-        
-        console.log(`🔄 Начинаем OAuth обмен для домена: ${domain}`);
+      // 4. Извлекаем данные. Судя по логам, данные приходят в req.query
+      const { DOMAIN, PROTOCOL, LANG, APP_SID, code, event } = { ...req.body, ...req.query };
 
-        // 6. ОБМЕН КОДА НА ТОКЕН (самое важное!)
-        // Получите client_id и client_secret из настроек приложения в Битрикс24
-        const CLIENT_ID = process.env.B24_CLIENT_ID;     // Хранить в переменных окружения Vercel!
-        const CLIENT_SECRET = process.env.B24_CLIENT_SECRET; // Хранить в переменных окружения Vercel!
+      console.log(`🔍 Извлечённые параметры:`, { DOMAIN, code, event, APP_SID });
+
+      // 5. Если есть код (code) — это запрос на OAuth авторизацию
+      if (code && DOMAIN) {
+        console.log(`🔄 Начинаем OAuth обмен для домена: ${DOMAIN}, код: ${code.substring(0, 10)}...`);
+
+        // 6. Используем переменные окружения
+        const CLIENT_ID = process.env.B24_CLIENT_ID;
+        const CLIENT_SECRET = process.env.B24_CLIENT_SECRET;
         
         if (!CLIENT_ID || !CLIENT_SECRET) {
-          console.error('❌ Не заданы CLIENT_ID или CLIENT_SECRET');
-          return res.status(500).json({ error: 'Server configuration error' });
+          console.error('❌ Ошибка: B24_CLIENT_ID или B24_CLIENT_SECRET не заданы в Environment Variables Vercel!');
+          return res.status(500).json({ 
+            error: 'Server configuration error',
+            message: 'Check environment variables in Vercel settings' 
+          });
         }
 
-        // Формируем запрос для обмена кода на токен
-        const tokenResponse = await fetch(`https://${domain}/oauth/token/`, {
+        // 7. ОБМЕН КОДА НА ТОКЕН
+        const tokenUrl = `https://${DOMAIN}/oauth/token/`;
+        console.log(`🔄 Отправляем запрос на: ${tokenUrl}`);
+        
+        const requestBody = new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          code: code,
+        });
+
+        const tokenResponse = await fetch(tokenUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
-            code: authCode,
-          }),
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Vercel-Serverless-Function' 
+          },
+          body: requestBody,
         });
 
         const tokenData = await tokenResponse.json();
+        console.log('🔐 Ответ от OAuth сервера:', tokenData);
         
         if (tokenData.error) {
-          console.error('❌ Ошибка OAuth:', tokenData);
-          return res.status(400).json({ error: 'OAuth exchange failed', details: tokenData });
+          console.error('❌ Ошибка OAuth:', tokenData.error_description || tokenData.error);
+          return res.status(400).json({ 
+            error: 'OAuth exchange failed',
+            details: tokenData 
+          });
         }
 
-        console.log('✅ Токены получены:', {
-          access_token: tokenData.access_token?.substring(0, 20) + '...',
-          expires_in: tokenData.expires_in,
-        });
-
-        // 7. Возвращаем успешный ответ
+        // 8. УСПЕХ
+        console.log('✅ Токены успешно получены!');
         return res.status(200).json({
           result: 'success',
-          message: 'Приложение успешно авторизовано',
-          // В реальном приложении токены нужно сохранить в БД
-          // и связать с пользователем/доменом
+          message: 'Приложение авторизовано',
           access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
           expires_in: tokenData.expires_in,
+          domain: DOMAIN
         });
 
-      } else {
-        // Это другой тип события (например, обновление приложения)
-        console.log('📋 Другое событие:', event);
+      } 
+      // 9. Если это не OAuth, а инициализация приложения (данные из логов)
+      else if (DOMAIN && APP_SID) {
+        console.log(`🏁 Инициализация приложения для домена: ${DOMAIN}, APP_SID: ${APP_SID}`);
+        
+        // Отвечаем, что готовы к работе
         return res.status(200).json({
           result: 'success',
-          message: 'Событие обработано',
-          event: event,
+          message: 'Application handler is ready',
+          mode: 'initialization',
+          domain: DOMAIN,
+          app_sid: APP_SID,
+          next_step: 'OAuth authorization required'
+        });
+      }
+      else {
+        // Неизвестный формат запроса
+        console.warn('⚠️ Неизвестный формат POST-запроса');
+        return res.status(400).json({ 
+          error: 'Invalid request format',
+          received_data: { DOMAIN, code, event, APP_SID } 
         });
       }
 
     } catch (error) {
-      console.error('❌ Ошибка в обработчике:', error);
+      console.error('❌ Критическая ошибка в обработчике:', error);
       return res.status(500).json({ 
         error: 'Internal Server Error',
-        details: error.message 
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
   }
 
-  // 8. Для GET и других методов возвращаем ошибку
+  // 10. Все остальные методы (GET, PUT, DELETE и т.д.)
+  console.warn(`🚫 Метод ${req.method} не разрешён`);
   return res.status(405).json({ 
     error: 'Method Not Allowed',
-    allowed: ['POST', 'OPTIONS'] 
+    allowed: ['POST', 'OPTIONS'],
+    message: 'Этот endpoint принимает только POST запросы от Битрикс24'
   });
 }
