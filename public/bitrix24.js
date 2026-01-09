@@ -5,63 +5,67 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 1. Инициализация в среде Битрикс24
     BX24.init(function() {
-        console.log('✅ BX24 инициализирован. Проверяем авторизацию...');
-        resultDiv.innerHTML = '<p><strong>Статус:</strong> Инициализация...</p>';
-
-        // 2. Проверяем, есть ли уже токен
+        console.log('✅ BX24 инициализирован.');
+        
+        // 2. Проверяем, есть ли авторизация
         let auth = BX24.getAuth();
-        if (!auth) {
-            // 3. Если токена нет, запрашиваем авторизацию
-            console.log('Токен не найден. Запуск OAuth...');
-            resultDiv.innerHTML += '<p>Запрос разрешений...</p>';
-            
-            // Этот метод откроет окно авторизации
-            BX24.refreshAuth(function(newAuth) {
-                console.log('✅ Новый токен получен:', newAuth);
-                resultDiv.innerHTML += '<p style="color:green;">✅ Авторизация пройдена!</p>';
-                enableAppFeatures(); // Включаем функции приложения
-            });
-        } else {
-            console.log('✅ Токен уже есть:', auth);
-            resultDiv.innerHTML += '<p style="color:green;">✅ Уже авторизован.</p>';
+        console.log('Токены от Битрикс24:', auth);
+        
+        if (auth && auth.access_token) {
+            // 3. Если токен есть, приложение уже авторизовано
+            resultDiv.innerHTML = `
+                <p style="color:green;"><strong>✅ Приложение готово!</strong></p>
+                <p>Токены получены автоматически. Можно тестировать API.</p>
+            `;
             enableAppFeatures();
+        } else {
+            // 4. Если по какой-то причине токенов нет, запрашиваем авторизацию
+            resultDiv.innerHTML = '<p>Запрос разрешений...</p>';
+            BX24.refreshAuth(function(newAuth) {
+                console.log('Новые токены:', newAuth);
+                resultDiv.innerHTML += '<p style="color:green;">✅ Авторизация пройдена!</p>';
+                enableAppFeatures();
+            });
         }
     });
 
     function enableAppFeatures() {
-        // Обновляем заголовок окна
+        // Обновляем заголовок
         BX24.setTitle('Мой AI-помощник (Готов)');
         
-        // Активируем кнопку тестирования
+        // Активируем кнопку
         testBtn.disabled = false;
-        testBtn.textContent = 'Получить мои данные из Битрикс24';
+        testBtn.textContent = 'Тест: Получить мои данные';
         
-        // Показываем инструкцию
+        // Показываем подсказку для следующего шага
         resultDiv.innerHTML += `
-            <p><strong>Приложение готово к работе!</strong></p>
-            <p>Нажмите кнопку выше, чтобы получить данные текущего пользователя через API Битрикс24.</p>
+            <hr>
+            <p><strong>Следующий шаг:</strong> Интегрировать AI (Chutes).</p>
+            <p>Теперь ваш бэкенд на Vercel может:</p>
+            <ol>
+                <li>Принимать запросы из этого интерфейса</li>
+                <li>Используя токены, работать с API Битрикс24</li>
+                <li>Отправлять данные в AI (Chutes) и возвращать результат</li>
+            </ol>
         `;
     }
 
-    // 4. Обработчик тестовой кнопки
+    // 5. Тестовый запрос к API Битрикс24
     testBtn.addEventListener('click', function() {
-        resultDiv.innerHTML = '<p>Запрос данных пользователя...</p>';
+        resultDiv.innerHTML = '<p>Запрос данных пользователя через API...</p>';
         
-        // Тестовый запрос к API Битрикс24
         BX24.callMethod('user.current', {}, function(res) {
             if (res.error()) {
                 console.error('Ошибка API:', res.error());
-                resultDiv.innerHTML = `<p style="color:red;">Ошибка: ${res.error().error_description}</p>`;
+                resultDiv.innerHTML = `<p style="color:red;">Ошибка API: ${res.error().error_description}</p>`;
             } else {
                 const user = res.data();
                 console.log('Данные пользователя:', user);
                 resultDiv.innerHTML = `
-                    <p><strong>✅ Данные получены!</strong></p>
+                    <p><strong>✅ Данные из Битрикс24 получены!</strong></p>
                     <p><strong>Имя:</strong> ${user.NAME} ${user.LAST_NAME}</p>
                     <p><strong>Email:</strong> ${user.EMAIL}</p>
                     <p><strong>ID:</strong> ${user.ID}</p>
-                    <hr>
-                    <p><em>Теперь можно интегрировать AI (Chutes).</em></p>
                 `;
             }
         });
