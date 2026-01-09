@@ -1,7 +1,5 @@
 {
   "name": "b24-local-app-demo",
-  "engines": {
-    "node": "24.x"
-  },
+  "engines": { "node": "24.x" },
   "type": "module"
 }
