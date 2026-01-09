@@ -2,35 +2,134 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Тестовое приложение для Битрикс24</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 800px; margin: auto; }
-        .info { background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #2d3748;
+            border-bottom: 2px solid #4299e1;
+            padding-bottom: 10px;
+        }
+        .status-box {
+            background-color: #e6f7ff;
+            border: 1px solid #91d5ff;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .controls {
+            margin: 25px 0;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            transition: background-color 0.3s;
+            font-weight: bold;
+        }
+        #testBtn {
+            background-color: #4299e1;
+            color: white;
+        }
+        #testBtn:hover {
+            background-color: #3182ce;
+        }
+        #testBtn:disabled {
+            background-color: #cbd5e0;
+            cursor: not-allowed;
+        }
+        #backendTestBtn {
+            background-color: #6c757d;
+            color: white;
+        }
+        #backendTestBtn:hover {
+            background-color: #5a6268;
+        }
+        #backendTestBtn:disabled {
+            background-color: #cbd5e0;
+            cursor: not-allowed;
+        }
+        #result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 6px;
+            background-color: white;
+            border: 1px solid #e2e8f0;
+            min-height: 100px;
+        }
+        .info-box {
+            background-color: #fff8e1;
+            border: 1px solid #ffd54f;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 25px;
+            font-size: 14px;
+        }
+        code {
+            background-color: #edf2f7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .success { color: #38a169; }
+        .error { color: #e53e3e; }
+        .warning { color: #d69e2e; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🧪 Тестовое приложение в Битрикс24</h1>
-        <p>Этот интерфейс будет загружен внутри вашего портала как локальное приложение.</p>
-
-        <div class="info">
-            <h3>Цель этого теста:</h3>
-            <ol>
-                <li>Проверить, что приложение корректно регистрируется в Битрикс24.</li>
-                <li>Проверить, что OAuth-авторизация проходит успешно (откроется отдельная вкладка).</li>
-                <li>Увидеть здесь в консоли (F12) данные, переданные Битрикс24 (логин пользователя, домен).</li>
-            </ol>
-            <p>Интеграция с AI (Chutes) и бизнес-логика будут добавлены после успеха этого этапа.</p>
+        <p>Этот интерфейс загружен внутри вашего портала как локальное приложение.</p>
+        
+        <div class="status-box">
+            <h3>Текущий статус:</h3>
+            <div id="status">
+                Инициализация приложения... Ожидайте.
+            </div>
         </div>
 
-        <button id="testBtn">Запросить данные пользователя</button>
-        <div id="result"></div>
+        <div class="controls">
+            <button id="testBtn">Запросить данные пользователя</button>
+            <button id="backendTestBtn">Тест связи с бэкендом</button>
+        </div>
+
+        <div id="result">
+            <!-- Здесь будут появляться результаты запросов -->
+            <p>Результаты ваших запросов появятся здесь.</p>
+        </div>
+
+        <div class="info-box">
+            <h3>Что тестируют эти кнопки:</h3>
+            <ul>
+                <li><strong>"Запросить данные пользователя"</strong> → Проверяет, что приложение может через библиотеку <code>BX24.js</code> получить данные текущего пользователя из API Битрикс24. Это подтверждает правильность авторизации.</li>
+                <li><strong>"Тест связи с бэкендом"</strong> → Отправляет тестовый POST-запрос на <code>/api/oauth-callback</code> вашего сервера на Vercel. Проверяет, что бэкенд готов обрабатывать запросы.</li>
+            </ul>
+            <p>Успешная работа обеих кнопок означает, что связка <strong>Битрикс24 ↔ Фронтенд ↔ Бэкенд (Vercel)</strong> настроена корректно.</p>
+        </div>
     </div>
 
     <!-- Подключаем официальную библиотеку для работы внутри iframe Битрикс24 -->
     <script src="//api.bitrix24.com/api/v1/"></script>
+    <!-- Подключаем наш скрипт с логикой приложения -->
     <script src="bitrix24.js"></script>
 </body>
 </html>
