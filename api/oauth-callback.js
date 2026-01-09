@@ -1,133 +1,224 @@
 // Файл: /api/oauth-callback.js
-// Полноценный OAuth-обработчик для Битрикс24 (рабочая версия)
+// Универсальный обработчик: и OAuth, и интерфейс
 
 export default async function handler(req, res) {
   // 1. Настраиваем CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // 2. Обработка предварительного запроса OPTIONS
+  // 2. Обработка OPTIONS
   if (req.method === 'OPTIONS') {
-    console.log('[CORS] Preflight request');
     return res.status(200).end();
   }
 
-  // 3. Обрабатываем POST-запросы
+  console.log(`📨 Запрос: ${req.method}`, { 
+    query: req.query, 
+    hasCode: !!req.query.code || !!(req.body && req.body.code) 
+  });
+
+  // 3. ОБРАБОТКА GET-ЗАПРОСОВ (загрузка интерфейса приложения)
+  if (req.method === 'GET' && !req.query.code) {
+    console.log('🖼️ Возвращаем HTML интерфейс приложения');
+    return res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="ru">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Тест AI чат для Битрикс24</title>
+          <style>
+              body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+              .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+              h1 { color: #2d3748; border-bottom: 2px solid #4299e1; padding-bottom: 10px; }
+              .status-box { background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 6px; padding: 15px; margin: 20px 0; }
+              button { padding: 12px 24px; background: #4299e1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 5px; }
+              button:hover { background: #3182ce; }
+              #result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px; min-height: 100px; }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <h1>🧪 Тестовый AI чат</h1>
+              <div class="status-box">
+                  <h3>Статус: <span id="statusText">Загрузка...</span></h3>
+                  <p id="statusDetails">Инициализация приложения в Битрикс24</p>
+              </div>
+              
+              <div>
+                  <button onclick="getUserData()">👤 Получить данные пользователя</button>
+                  <button onclick="testBackend()">🔗 Тест связи с бэкендом</button>
+                  <button onclick="testAI()">🤖 Тест AI (Chutes)</button>
+              </div>
+              
+              <div id="result">
+                  <p>Результаты запросов появятся здесь</p>
+              </div>
+              
+              <div style="margin-top: 30px; padding: 15px; background: #fff8e1; border-radius: 6px; font-size: 14px;">
+                  <h4>Информация:</h4>
+                  <p>Это тестовое приложение демонстрирует интеграцию:</p>
+                  <ul>
+                      <li>✅ Работа внутри iframe Битрикс24</li>
+                      <li>✅ Авторизация OAuth 2.0</li>
+                      <li>✅ Вызов API Битрикс24</li>
+                      <li>⏳ Интеграция с AI (Chutes) - в разработке</li>
+                  </ul>
+              </div>
+          </div>
+
+          <!-- Библиотека Битрикс24 -->
+          <script src="//api.bitrix24.com/api/v1/"></script>
+          
+          <script>
+              let authData = null;
+              
+              // Инициализация приложения
+              BX24.init(function() {
+                  document.getElementById('statusText').textContent = '✅ Готово';
+                  document.getElementById('statusDetails').textContent = 'Приложение инициализировано';
+                  authData = BX24.getAuth();
+                  console.log('Данные авторизации:', authData);
+                  
+                  // Обновляем заголовок
+                  BX24.setTitle('Тест AI чат');
+              });
+              
+              // Функция получения данных пользователя
+              async function getUserData() {
+                  const resultDiv = document.getElementById('result');
+                  resultDiv.innerHTML = '<p>⏳ Запрашиваю данные пользователя...</p>';
+                  
+                  BX24.callMethod('user.current', {}, function(res) {
+                      if(res.error()) {
+                          resultDiv.innerHTML = '<p style="color: red;">❌ Ошибка: ' + res.error().error_description + '</p>';
+                      } else {
+                          const user = res.data();
+                          resultDiv.innerHTML = \`
+                              <p><strong>✅ Данные получены:</strong></p>
+                              <p><strong>Имя:</strong> \${user.NAME} \${user.LAST_NAME}</p>
+                              <p><strong>Email:</strong> \${user.EMAIL}</p>
+                              <p><strong>Должность:</strong> \${user.WORK_POSITION || 'Не указана'}</p>
+                          \`;
+                      }
+                  });
+              }
+              
+              // Тест связи с бэкендом
+              async function testBackend() {
+                  const resultDiv = document.getElementById('result');
+                  resultDiv.innerHTML = '<p>⏳ Тестирую связь с бэкендом Vercel...</p>';
+                  
+                  try {
+                      const response = await fetch('/api/oauth-callback?test=ping', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ test: 'frontend_check', time: new Date().toISOString() })
+                      });
+                      const data = await response.json();
+                      resultDiv.innerHTML = \`
+                          <p><strong>✅ Ответ от бэкенда:</strong></p>
+                          <pre>\${JSON.stringify(data, null, 2)}</pre>
+                      \`;
+                  } catch (error) {
+                      resultDiv.innerHTML = '<p style="color: red;">❌ Ошибка связи: ' + error.message + '</p>';
+                  }
+              }
+              
+              // Тест AI (заглушка)
+              function testAI() {
+                  document.getElementById('result').innerHTML = \`
+                      <p><strong>🤖 Тест AI (Chutes)</strong></p>
+                      <p>Эта функция будет подключена позже.</p>
+                      <p>Для теста AI используйте предыдущий проект: <a href="https://aceweb-ai.github.io/ai-bot/" target="_blank">Чат-бот для сайта</a></p>
+                  \`;
+              }
+          </script>
+      </body>
+      </html>
+    `);
+  }
+
+  // 4. ОБРАБОТКА POST-ЗАПРОСОВ (OAuth и API вызовы)
   if (req.method === 'POST') {
     try {
-      console.log('📨 [MAIN] Получен POST запрос от Битрикс24');
+      console.log('📨 POST запрос от Битрикс24');
       
-      // ВАЖНО: Битрикс24 может отправлять данные в теле (req.body) или в query (req.query)
-      // Логируем всё для диагностики
-      const requestData = {
-        body: req.body,
-        query: req.query,
-        headers: req.headers
+      // Собираем данные из разных источников
+      const data = {
+        ...req.query,
+        ...(req.body || {})
       };
-      console.log('📦 Полные данные запроса:', JSON.stringify(requestData, null, 2));
-
-      // 4. Извлекаем данные. Судя по логам, данные приходят в req.query
-      const { DOMAIN, PROTOCOL, LANG, APP_SID, code, event } = { ...req.body, ...req.query };
-
-      console.log(`🔍 Извлечённые параметры:`, { DOMAIN, code, event, APP_SID });
-
-      // 5. Если есть код (code) — это запрос на OAuth авторизацию
+      
+      const { code, DOMAIN, event, APP_SID } = data;
+      
+      // 5. Если это OAuth-авторизация (есть код)
       if (code && DOMAIN) {
-        console.log(`🔄 Начинаем OAuth обмен для домена: ${DOMAIN}, код: ${code.substring(0, 10)}...`);
-
-        // 6. Используем переменные окружения
+        console.log(`🔄 OAuth обмен для ${DOMAIN}`);
+        
         const CLIENT_ID = process.env.B24_CLIENT_ID;
         const CLIENT_SECRET = process.env.B24_CLIENT_SECRET;
         
         if (!CLIENT_ID || !CLIENT_SECRET) {
-          console.error('❌ Ошибка: B24_CLIENT_ID или B24_CLIENT_SECRET не заданы в Environment Variables Vercel!');
-          return res.status(500).json({ 
-            error: 'Server configuration error',
-            message: 'Check environment variables in Vercel settings' 
-          });
+          throw new Error('Не заданы B24_CLIENT_ID или B24_CLIENT_SECRET в настройках Vercel');
         }
-
-        // 7. ОБМЕН КОДА НА ТОКЕН
-        const tokenUrl = `https://${DOMAIN}/oauth/token/`;
-        console.log(`🔄 Отправляем запрос на: ${tokenUrl}`);
         
-        const requestBody = new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          code: code,
-        });
-
-        const tokenResponse = await fetch(tokenUrl, {
+        // Обмен кода на токен
+        const tokenResponse = await fetch(\`https://\${DOMAIN}/oauth/token/\`, {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Vercel-Serverless-Function' 
-          },
-          body: requestBody,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            code: code,
+          }),
         });
-
+        
         const tokenData = await tokenResponse.json();
-        console.log('🔐 Ответ от OAuth сервера:', tokenData);
         
         if (tokenData.error) {
-          console.error('❌ Ошибка OAuth:', tokenData.error_description || tokenData.error);
-          return res.status(400).json({ 
-            error: 'OAuth exchange failed',
-            details: tokenData 
-          });
+          console.error('❌ Ошибка OAuth:', tokenData);
+          return res.status(400).json({ error: 'OAuth failed', details: tokenData });
         }
-
-        // 8. УСПЕХ
-        console.log('✅ Токены успешно получены!');
+        
+        console.log('✅ Токены получены');
         return res.status(200).json({
           result: 'success',
-          message: 'Приложение авторизовано',
+          message: 'Авторизация успешна',
           access_token: tokenData.access_token,
-          expires_in: tokenData.expires_in,
-          domain: DOMAIN
+          expires_in: tokenData.expires_in
         });
-
-      } 
-      // 9. Если это не OAuth, а инициализация приложения (данные из логов)
-      else if (DOMAIN && APP_SID) {
-        console.log(`🏁 Инициализация приложения для домена: ${DOMAIN}, APP_SID: ${APP_SID}`);
-        
-        // Отвечаем, что готовы к работе
+      }
+      
+      // 6. Если это инициализация приложения (как в логах)
+      if (DOMAIN && APP_SID) {
+        console.log(\`🏁 Инициализация приложения для \${DOMAIN}\`);
         return res.status(200).json({
           result: 'success',
           message: 'Application handler is ready',
           mode: 'initialization',
           domain: DOMAIN,
           app_sid: APP_SID,
-          next_step: 'OAuth authorization required'
+          frontend_available: true,
+          note: 'Интерфейс приложения доступен по этому же URL'
         });
       }
-      else {
-        // Неизвестный формат запроса
-        console.warn('⚠️ Неизвестный формат POST-запроса');
-        return res.status(400).json({ 
-          error: 'Invalid request format',
-          received_data: { DOMAIN, code, event, APP_SID } 
-        });
-      }
-
-    } catch (error) {
-      console.error('❌ Критическая ошибка в обработчике:', error);
-      return res.status(500).json({ 
-        error: 'Internal Server Error',
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      
+      // 7. Простой тестовый запрос
+      return res.status(200).json({
+        result: 'success',
+        message: 'POST запрос получен',
+        data: data,
+        timestamp: new Date().toISOString()
       });
+      
+    } catch (error) {
+      console.error('❌ Ошибка:', error);
+      return res.status(500).json({ error: error.message });
     }
   }
 
-  // 10. Все остальные методы (GET, PUT, DELETE и т.д.)
-  console.warn(`🚫 Метод ${req.method} не разрешён`);
-  return res.status(405).json({ 
-    error: 'Method Not Allowed',
-    allowed: ['POST', 'OPTIONS'],
-    message: 'Этот endpoint принимает только POST запросы от Битрикс24'
-  });
+  // 8. Для остальных методов
+  return res.status(405).json({ error: 'Method Not Allowed' });
 }
