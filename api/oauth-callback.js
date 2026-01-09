@@ -1,133 +1,185 @@
 // Файл: /api/oauth-callback.js
-// Полноценный OAuth-обработчик для Битрикс24 (рабочая версия)
+// Универсальный обработчик для серверного приложения Битрикс24
 
 export default async function handler(req, res) {
-  // 1. Настраиваем CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  // 2. Обработка предварительного запроса OPTIONS
-  if (req.method === 'OPTIONS') {
-    console.log('[CORS] Preflight request');
-    return res.status(200).end();
-  }
-
-  // 3. Обрабатываем POST-запросы
-  if (req.method === 'POST') {
-    try {
-      console.log('📨 [MAIN] Получен POST запрос от Битрикс24');
-      
-      // ВАЖНО: Битрикс24 может отправлять данные в теле (req.body) или в query (req.query)
-      // Логируем всё для диагностики
-      const requestData = {
-        body: req.body,
-        query: req.query,
-        headers: req.headers
-      };
-      console.log('📦 Полные данные запроса:', JSON.stringify(requestData, null, 2));
-
-      // 4. Извлекаем данные. Судя по логам, данные приходят в req.query
-      const { DOMAIN, PROTOCOL, LANG, APP_SID, code, event } = { ...req.body, ...req.query };
-
-      console.log(`🔍 Извлечённые параметры:`, { DOMAIN, code, event, APP_SID });
-
-      // 5. Если есть код (code) — это запрос на OAuth авторизацию
-      if (code && DOMAIN) {
-        console.log(`🔄 Начинаем OAuth обмен для домена: ${DOMAIN}, код: ${code.substring(0, 10)}...`);
-
-        // 6. Используем переменные окружения
-        const CLIENT_ID = process.env.B24_CLIENT_ID;
-        const CLIENT_SECRET = process.env.B24_CLIENT_SECRET;
-        
-        if (!CLIENT_ID || !CLIENT_SECRET) {
-          console.error('❌ Ошибка: B24_CLIENT_ID или B24_CLIENT_SECRET не заданы в Environment Variables Vercel!');
-          return res.status(500).json({ 
-            error: 'Server configuration error',
-            message: 'Check environment variables in Vercel settings' 
-          });
-        }
-
-        // 7. ОБМЕН КОДА НА ТОКЕН
-        const tokenUrl = `https://${DOMAIN}/oauth/token/`;
-        console.log(`🔄 Отправляем запрос на: ${tokenUrl}`);
-        
-        const requestBody = new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          code: code,
-        });
-
-        const tokenResponse = await fetch(tokenUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Vercel-Serverless-Function' 
-          },
-          body: requestBody,
-        });
-
-        const tokenData = await tokenResponse.json();
-        console.log('🔐 Ответ от OAuth сервера:', tokenData);
-        
-        if (tokenData.error) {
-          console.error('❌ Ошибка OAuth:', tokenData.error_description || tokenData.error);
-          return res.status(400).json({ 
-            error: 'OAuth exchange failed',
-            details: tokenData 
-          });
-        }
-
-        // 8. УСПЕХ
-        console.log('✅ Токены успешно получены!');
-        return res.status(200).json({
-          result: 'success',
-          message: 'Приложение авторизовано',
-          access_token: tokenData.access_token,
-          expires_in: tokenData.expires_in,
-          domain: DOMAIN
-        });
-
-      } 
-      // 9. Если это не OAuth, а инициализация приложения (данные из логов)
-      else if (DOMAIN && APP_SID) {
-        console.log(`🏁 Инициализация приложения для домена: ${DOMAIN}, APP_SID: ${APP_SID}`);
-        
-        // Отвечаем, что готовы к работе
-        return res.status(200).json({
-          result: 'success',
-          message: 'Application handler is ready',
-          mode: 'initialization',
-          domain: DOMAIN,
-          app_sid: APP_SID,
-          next_step: 'OAuth authorization required'
-        });
-      }
-      else {
-        // Неизвестный формат запроса
-        console.warn('⚠️ Неизвестный формат POST-запроса');
-        return res.status(400).json({ 
-          error: 'Invalid request format',
-          received_data: { DOMAIN, code, event, APP_SID } 
-        });
-      }
-
-    } catch (error) {
-      console.error('❌ Критическая ошибка в обработчике:', error);
-      return res.status(500).json({ 
-        error: 'Internal Server Error',
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
+    // 1. Настраиваем CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    // 2. Обработка OPTIONS
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
-  }
-
-  // 10. Все остальные методы (GET, PUT, DELETE и т.д.)
-  console.warn(`🚫 Метод ${req.method} не разрешён`);
-  return res.status(405).json({ 
-    error: 'Method Not Allowed',
-    allowed: ['POST', 'OPTIONS'],
-    message: 'Этот endpoint принимает только POST запросы от Битрикс24'
-  });
+    
+    // 3. Логируем для диагностики
+    console.log(`📨 [${req.method}] Запрос от Битрикс24`);
+    console.log('Query:', req.query);
+    console.log('Body:', req.body);
+    
+    // 4. КРИТИЧЕСКИ ВАЖНО: Проверяем, если это запрос интерфейса
+    // Битрикс24 при открытии iframe отправляет GET без code
+    const { code, DOMAIN, APP_SID } = { ...req.query, ...req.body };
+    
+    if (!code && DOMAIN && APP_SID) {
+        // Это запрос на загрузку интерфейса приложения
+        console.log('🖼️ Возвращаем HTML интерфейс для iframe');
+        return res.status(200).setHeader('Content-Type', 'text/html').send(`
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Мой AI-помощник</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { padding: 12px 24px; margin: 10px; font-size: 16px; cursor: pointer; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>🧠 Мой AI-помощник в Битрикс24</h1>
+    
+    <div class="status info" id="status">Инициализация...</div>
+    
+    <button onclick="checkAuth()" id="authBtn">🔐 Проверить авторизацию</button>
+    <button onclick="callAPI()" id="apiBtn" disabled>🧪 Тест API Битрикс24</button>
+    
+    <div id="result" style="margin-top: 20px;"></div>
+    
+    <script src="//api.bitrix24.com/api/v1/"></script>
+    <script>
+        const statusEl = document.getElementById('status');
+        const resultEl = document.getElementById('result');
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = \`status \${type}\`;
+            div.innerHTML = message;
+            resultEl.appendChild(div);
+            console.log(message);
+        }
+        
+        // Инициализация
+        BX24.init(function() {
+            statusEl.textContent = '✅ Библиотека BX24 загружена';
+            log('Приложение инициализировано в iframe Битрикс24');
+            
+            // Проверяем авторизацию
+            const auth = BX24.getAuth();
+            if (auth && auth.access_token) {
+                log(\`✅ Уже авторизован<br>Домен: \${auth.domain}<br>Токен: \${auth.access_token.substring(0, 20)}...\`, 'success');
+                document.getElementById('apiBtn').disabled = false;
+            } else {
+                log('⚠️ Требуется авторизация', 'info');
+            }
+        });
+        
+        function checkAuth() {
+            log('Проверяем авторизацию...');
+            const auth = BX24.getAuth();
+            
+            if (!auth) {
+                log('Токена нет. Запрашиваем авторизацию...', 'info');
+                BX24.refreshAuth(function(newAuth) {
+                    if (newAuth && newAuth.access_token) {
+                        log(\`✅ Авторизация успешна!<br>Токен получен: \${newAuth.access_token.substring(0, 20)}...\`, 'success');
+                        document.getElementById('apiBtn').disabled = false;
+                    } else {
+                        log('❌ Ошибка авторизации', 'error');
+                    }
+                });
+            } else {
+                log(\`✅ Токен уже есть: \${auth.access_token.substring(0, 20)}...\`, 'success');
+                document.getElementById('apiBtn').disabled = false;
+            }
+        }
+        
+        function callAPI() {
+            log('Выполняем запрос к API Битрикс24...');
+            
+            BX24.callMethod('user.current', {}, function(res) {
+                if (res.error()) {
+                    log(\`❌ Ошибка API: \${res.error().error_description}\`, 'error');
+                } else {
+                    const user = res.data();
+                    log(\`
+                        ✅ API работает!<br>
+                        <strong>Имя:</strong> \${user.NAME || ''} \${user.LAST_NAME || ''}<br>
+                        <strong>Email:</strong> \${user.EMAIL || 'не указан'}<br>
+                        <strong>ID:</strong> \${user.ID}<br><br>
+                        🎉 <strong>Связка Битрикс24 ↔ Vercel работает!</strong>
+                    \`, 'success');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+        `);
+    }
+    
+    // 5. Обработка OAuth-запросов (POST с code)
+    if (req.method === 'POST' && code && DOMAIN) {
+        console.log(`🔄 OAuth запрос для домена: ${DOMAIN}`);
+        
+        try {
+            const CLIENT_ID = process.env.B24_CLIENT_ID;
+            const CLIENT_SECRET = process.env.B24_CLIENT_SECRET;
+            
+            if (!CLIENT_ID || !CLIENT_SECRET) {
+                throw new Error('Не заданы B24_CLIENT_ID или B24_CLIENT_SECRET в настройках Vercel');
+            }
+            
+            // Обмен code на токен
+            const tokenUrl = `https://${DOMAIN}/oauth/token/`;
+            const response = await fetch(tokenUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    client_id: CLIENT_ID,
+                    client_secret: CLIENT_SECRET,
+                    code: code,
+                }),
+            });
+            
+            const tokenData = await response.json();
+            
+            if (tokenData.error) {
+                console.error('❌ Ошибка OAuth:', tokenData);
+                return res.status(400).json({ 
+                    result: 'error', 
+                    error: tokenData.error_description || tokenData.error 
+                });
+            }
+            
+            console.log('✅ Токены получены');
+            return res.status(200).json({
+                result: 'success',
+                access_token: tokenData.access_token,
+                refresh_token: tokenData.refresh_token,
+                expires_in: tokenData.expires_in,
+                domain: DOMAIN
+            });
+            
+        } catch (error) {
+            console.error('❌ Ошибка:', error);
+            return res.status(500).json({ 
+                result: 'error', 
+                error: error.message 
+            });
+        }
+    }
+    
+    // 6. Для всех остальных случаев
+    return res.status(200).json({
+        result: 'success',
+        message: 'Обработчик работает',
+        mode: 'general',
+        domain: DOMAIN,
+        app_sid: APP_SID
+    });
 }
