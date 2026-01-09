@@ -2,86 +2,109 @@
 document.addEventListener('DOMContentLoaded', function() {
     const resultDiv = document.getElementById('result');
     
-    // Создаём кнопку для запуска OAuth
-    const authButton = document.createElement('button');
-    authButton.id = 'authBtn';
-    authButton.textContent = '🔐 ШАГ 1: Авторизовать приложение';
-    authButton.style.cssText = 'padding: 15px; font-size: 16px; margin: 10px; background: #2d7ee7; color: white; border: none; border-radius: 5px; cursor: pointer;';
+    // Создаём кнопку для теста
+    const testBtn = document.createElement('button');
+    testBtn.id = 'testBtn';
+    testBtn.textContent = '🧪 Тест: Проверить авторизацию и API';
+    testBtn.style.cssText = `
+        padding: 15px 25px; 
+        font-size: 16px; 
+        background: #4CAF50; 
+        color: white; 
+        border: none; 
+        border-radius: 5px; 
+        cursor: pointer;
+        margin: 10px 0;
+    `;
     
-    // Создаём кнопку для теста API (изначально неактивна)
-    const testButton = document.createElement('button');
-    testButton.id = 'testBtn';
-    testButton.textContent = '🧪 ШАГ 2: Проверить API (сначала авторизуйтесь)';
-    testButton.style.cssText = 'padding: 15px; font-size: 16px; margin: 10px; background: #ccc; color: #666; border: none; border-radius: 5px; cursor: not-allowed;';
-    testButton.disabled = true;
-    
-    // Вставляем кнопки в интерфейс
-    resultDiv.appendChild(authButton);
+    resultDiv.appendChild(testBtn);
     resultDiv.appendChild(document.createElement('br'));
-    resultDiv.appendChild(testButton);
+    
+    // Функция для вывода сообщений
+    function log(msg, isError = false) {
+        const p = document.createElement('p');
+        p.innerHTML = isError ? `<span style="color:red">❌ ${msg}</span>` : msg;
+        p.style.margin = '10px 0';
+        p.style.padding = '10px';
+        p.style.background = isError ? '#ffe6e6' : '#f0f8ff';
+        p.style.borderRadius = '5px';
+        resultDiv.appendChild(p);
+        console.log(isError ? '❌ ' + msg : '✅ ' + msg);
+    }
     
     // 1. Инициализация
     BX24.init(function() {
-        console.log('BX24 инициализирован в iframe');
-        updateStatus('Приложение загружено. Нажмите "Шаг 1" для авторизации.');
-    });
-    
-    // 2. Обработчик кнопки авторизации
-    authButton.addEventListener('click', function() {
-        updateStatus('Открывается окно авторизации... Разрешите всплывающие окна!');
-        authButton.disabled = true;
-        authButton.textContent = 'Ждём подтверждения...';
+        log('BX24 инициализирован в iframe Битрикс24');
         
-        // ЗАПУСК OAuth
-        BX24.refreshAuth(function(newAuth) {
-            if (newAuth && newAuth.access_token) {
-                console.log('✅ Успех! Токен:', newAuth);
-                updateStatus('✅ Авторизация успешна! Теперь можно тестировать API.');
-                
-                // Активируем кнопку теста
-                testButton.disabled = false;
-                testButton.style.background = '#4CAF50';
-                testButton.style.color = 'white';
-                testButton.style.cursor = 'pointer';
-                testButton.textContent = '🧪 ШАГ 2: Получить мои данные из Битрикс24';
-                
-                authButton.textContent = '✅ Уже авторизовано';
-            } else {
-                updateStatus('❌ Ошибка авторизации. Проверьте консоль (F12).');
-                authButton.disabled = false;
-                authButton.textContent = '🔐 Повторить авторизацию';
-            }
-        });
+        // 2. Проверяем авторизацию через BX24.getAuth()
+        const authData = BX24.getAuth();
+        console.log('Auth data from BX24:', authData);
+        
+        if (authData && authData.access_token) {
+            log(`✅ Уже авторизован!<br>
+                Домен: ${authData.domain}<br>
+                Токен: ${authData.access_token.substring(0, 25)}...<br>
+                Истекает: ${new Date(authData.expires_in).toLocaleTimeString()}`);
+        } else {
+            log('⚠️ Токен не найден через BX24.getAuth()');
+        }
     });
     
     // 3. Обработчик тестовой кнопки
-    testButton.addEventListener('click', function() {
-        updateStatus('Запрашиваем данные...');
-        BX24.callMethod('user.current', {}, function(res) {
-            if (res.error()) {
-                updateStatus('❌ Ошибка API: ' + res.error().error_description);
-            } else {
-                const user = res.data();
-                updateStatus(`
-                    ✅ Данные получены!<br>
-                    <strong>Имя:</strong> ${user.NAME} ${user.LAST_NAME}<br>
-                    <strong>Email:</strong> ${user.EMAIL}<br>
-                    <strong>ID:</strong> ${user.ID}<br>
-                    <hr>
-                    🎉 <strong>Связка работает! Можно интегрировать AI.</strong>
-                `);
-            }
-        });
+    testBtn.addEventListener('click', function() {
+        log('🔄 Проверяем авторизацию и тестируем API...');
+        
+        // Вариант 1: Используем BX24.getAuth()
+        const auth = BX24.getAuth();
+        
+        if (!auth || !auth.access_token) {
+            log('❌ Токен не найден через BX24.getAuth(). Попробуем BX24.refreshAuth()...');
+            
+            // Пробуем запросить авторизацию, если токена нет
+            BX24.refreshAuth(function(newAuth) {
+                if (newAuth && newAuth.access_token) {
+                    log('✅ Авторизация через refreshAuth успешна!');
+                    testAPI();
+                } else {
+                    log('❌ Не удалось получить авторизацию. Пожалуйста, переустановите приложение в Битрикс24.', true);
+                }
+            });
+        } else {
+            log('✅ Токен найден через getAuth()!');
+            testAPI();
+        }
     });
     
-    function updateStatus(msg) {
-        const statusDiv = document.getElementById('status') || (function() {
-            const div = document.createElement('div');
-            div.id = 'status';
-            div.style.marginTop = '20px';
-            resultDiv.appendChild(div);
-            return div;
-        })();
-        statusDiv.innerHTML = `<p>${msg}</p>`;
+    function testAPI() {
+        log('🔄 Делаем тестовый запрос к API Битрикс24...');
+        
+        // Простой тестовый запрос
+        BX24.callMethod('user.current', {}, function(res) {
+            if (res.error()) {
+                console.error('API Error:', res.error());
+                log(`❌ Ошибка API: ${res.error().error_description}`, true);
+            } else {
+                const user = res.data();
+                console.log('User data:', user);
+                log(`✅ API работает! Получены данные пользователя:<br>
+                    <strong>Имя:</strong> ${user.NAME || ''} ${user.LAST_NAME || ''}<br>
+                    <strong>Email:</strong> ${user.EMAIL || 'не указан'}<br>
+                    <strong>ID:</strong> ${user.ID}<br>
+                    <hr>
+                    <strong style="color:green">🎉 Связка Битрикс24 ↔ Vercel работает!</strong><br>
+                    Теперь можно интегрировать AI (Chutes).`);
+            }
+        });
     }
+    
+    // Выводим инструкцию
+    log(`
+        <strong>Текущий статус:</strong><br>
+        1. ✅ Бэкенд принимает запросы от Битрикс24<br>
+        2. ✅ Битрикс24 передает токены (AUTH_ID, REFRESH_ID)<br>
+        3. ⏳ Проверяем доступность токенов на фронтенде<br>
+        4. ⏳ Тестируем вызовы API Битрикс24<br>
+        <hr>
+        Нажмите кнопку выше для тестирования.
+    `);
 });
