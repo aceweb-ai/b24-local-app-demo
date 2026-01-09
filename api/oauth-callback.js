@@ -1,5 +1,5 @@
 // Файл: /api/oauth-callback.js
-// Универсальный обработчик: и OAuth, и интерфейс
+// Универсальный обработчик с поддержкой ES6 модулей
 
 export default async function handler(req, res) {
   // 1. Настраиваем CORS
@@ -154,7 +154,7 @@ export default async function handler(req, res) {
       
       // 5. Если это OAuth-авторизация (есть код)
       if (code && DOMAIN) {
-        console.log(`🔄 OAuth обмен для ${DOMAIN}`);
+        console.log(\`🔄 OAuth обмен для \${DOMAIN}\`);
         
         const CLIENT_ID = process.env.B24_CLIENT_ID;
         const CLIENT_SECRET = process.env.B24_CLIENT_SECRET;
