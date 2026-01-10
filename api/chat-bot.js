@@ -1,14 +1,15 @@
 // Файл: /api/chat-bot.js
-// ПРОСТОЙ ДИАГНОСТИЧЕСКИЙ КОД - ТОЛЬКО ЛОГИРУЕТ ВСЁ
+// РАБОЧИЙ код для регистрации чат-бота
 
 export default async function handler(req, res) {
-  // 1. ЛОГИРУЕМ ВСЁ
-  console.log('=== 🚨 НАЧАЛО ПОЛНОГО ЛОГА ===');
-  console.log('📨 МЕТОД:', req.method);
-  console.log('🔗 URL:', req.url);
-  console.log('🔍 QUERY ПАРАМЕТРЫ:', req.query);
-  
-  // 2. Читаем тело запроса КАК ЕСТЬ
+  // Настройка CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // Читаем тело запроса
   let rawBody = '';
   try {
     rawBody = await new Promise((resolve) => {
@@ -16,17 +17,126 @@ export default async function handler(req, res) {
       req.on('data', chunk => data += chunk);
       req.on('end', () => resolve(data));
     });
-    console.log('📦 СЫРОЕ ТЕЛО (первые 1000 символов):');
-    console.log(rawBody.substring(0, 1000));
   } catch (e) {
-    console.error('❌ Ошибка чтения тела:', e);
+    console.error('Ошибка чтения тела:', e);
+    return res.status(400).json({ error: 'Bad Request' });
   }
 
-  // 3. Отвечаем УСПЕХОМ в любом случае
-  res.setHeader('Content-Type', 'application/json');
-  return res.status(200).json({
-    result: 'debug',
-    message: 'Диагностика завершена. Проверь логи в Vercel.',
-    timestamp: new Date().toISOString()
+  console.log('📨 Получен запрос. Длина тела:', rawBody.length);
+
+  // Парсим application/x-www-form-urlencoded
+  const params = new URLSearchParams(rawBody);
+  const body = Object.fromEntries(params);
+
+  // Преобразуем PHP-стиль массивов в объекты
+  const event = body.event;
+  
+  // Извлекаем auth данные
+  const authData = {};
+  const dataObj = {};
+  
+  Object.keys(body).forEach(key => {
+    if (key.startsWith('auth[')) {
+      const match = key.match(/auth\[([^\]]+)\]/);
+      if (match) authData[match[1]] = body[key];
+    } else if (key.startsWith('data[')) {
+      const match = key.match(/data\[([^\]]+)\]/);
+      if (match) dataObj[match[1]] = body[key];
+    }
   });
+
+  console.log(`🔍 Событие: ${event}`);
+  console.log('🔐 Auth данные:', Object.keys(authData));
+  console.log('📊 Data данные:', dataObj);
+
+  // ОБРАБОТКА ONAPPINSTALL
+  if (event === 'ONAPPINSTALL') {
+    console.log('🔄 Начинаем регистрацию бота...');
+
+    // Проверяем обязательные поля
+    if (!authData.access_token || !authData.client_endpoint) {
+      console.error('❌ Нет токена или endpoint:', authData);
+      return res.status(400).json({ error: 'Missing auth data' });
+    }
+
+    try {
+      // 1. Формируем URL для обработчика
+      const handlerBackUrl = `https://${req.headers.host}${req.url}`;
+      console.log(`🌐 URL обработчика: ${handlerBackUrl}`);
+
+      // 2. Регистрируем бота через API Битрикс24
+      const registerResult = await callBitrixApi('imbot.register', {
+        CODE: 'ai_site_helper',
+        TYPE: 'O', // Бот для открытых линий
+        EVENT_MESSAGE_ADD: handlerBackUrl,
+        EVENT_WELCOME_MESSAGE: handlerBackUrl,
+        EVENT_BOT_DELETE: handlerBackUrl,
+        OPENLINE: 'Y',
+        PROPERTIES: {
+          NAME: 'AI Помощник для сайта',
+          WORK_POSITION: 'Отвечает на вопросы посетителей сайта',
+          COLOR: 'GREEN'
+        }
+      }, authData);
+
+      const botId = registerResult.result;
+      console.log(`✅ Бот зарегистрирован! ID: ${botId}`);
+
+      // 3. Сохраняем ID бота (в реальном проекте - в БД)
+      // Пока просто возвращаем успех
+
+      return res.status(200).json({
+        result: 'success',
+        botId: botId,
+        message: 'Chat-bot registered successfully'
+      });
+
+    } catch (error) {
+      console.error('❌ Ошибка регистрации бота:', error);
+      return res.status(500).json({
+        error: 'Bot registration failed',
+        details: error.message
+      });
+    }
+  }
+
+  // Для других событий пока просто отвечаем OK
+  return res.status(200).json({ result: 'ok', event: event });
+}
+
+// Вспомогательная функция для вызова API Битрикс24
+async function callBitrixApi(method, params, auth) {
+  const queryUrl = `${auth.client_endpoint}${method}`;
+  
+  // Подготавливаем параметры
+  const queryParams = new URLSearchParams();
+  queryParams.append('auth', auth.access_token);
+  
+  // Добавляем остальные параметры
+  Object.keys(params).forEach(key => {
+    if (typeof params[key] === 'object') {
+      queryParams.append(key, JSON.stringify(params[key]));
+    } else {
+      queryParams.append(key, params[key]);
+    }
+  });
+
+  console.log(`🌐 Вызов API: ${method} на ${auth.client_endpoint}`);
+
+  const response = await fetch(queryUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: queryParams.toString()
+  });
+
+  const result = await response.json();
+  
+  if (result.error) {
+    console.error(`Ошибка API ${method}:`, result);
+    throw new Error(result.error_description || result.error);
+  }
+
+  return result;
 }
