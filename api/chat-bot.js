@@ -100,6 +100,58 @@ const registerResult = await callBitrixApi('imbot.register', {
     }
   }
 
+  // ========== ОБРАБОТКА СОБЫТИЯ: НОВОЕ СООБЩЕНИЕ ОТ ПОЛЬЗОВАТЕЛЯ ==========
+  if (event === 'ONIMBOTMESSAGEADD') {
+    console.log('💬 Получено новое сообщение от пользователя');
+
+    // 1. ПРАВИЛЬНО ИЗВЛЕКАЕМ ПАРАМЕТРЫ СООБЩЕНИЯ
+    // Битрикс24 присылает данные в формате data[PARAMS][FIELD_NAME]
+    const messageParams = {};
+    Object.keys(body).forEach(key => {
+      // Ищем ключи вида data[PARAMS][DIALOG_ID], data[PARAMS][MESSAGE] и т.д.
+      const match = key.match(/^data\[PARAMS\]\[([^\]]+)\]$/);
+      if (match) {
+        messageParams[match[1]] = body[key];
+      }
+    });
+
+    const dialogId = messageParams.DIALOG_ID;
+    const userMessage = messageParams.MESSAGE;
+    const fromUserId = messageParams.FROM_USER_ID;
+
+    console.log(`📩 Параметры сообщения:`, {
+      dialogId,
+      userMessage: userMessage ? `"${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}"` : 'нет',
+      fromUserId
+    });
+
+    // 2. ПРОВЕРЯЕМ, ЧТО ЭТО СООБЩЕНИЕ ИЗ ОТКРЫТОЙ ЛИНИИ
+    if (messageParams.CHAT_ENTITY_TYPE !== 'LINES') {
+      console.log('⚠️ Не открытая линия, игнорируем');
+      return res.status(200).end();
+    }
+
+    // 3. ОТПРАВЛЯЕМ ПРОСТОЙ ТЕСТОВЫЙ ОТВЕТ
+    if (dialogId && userMessage && authData.access_token) {
+      try {
+        const botReply = `Бот получил ваше сообщение: "${userMessage}". Работа над ответом...`;
+        
+        // Вызываем API Битрикс24 для отправки ответа
+        await callBitrixApi('imbot.message.add', {
+          DIALOG_ID: dialogId,
+          MESSAGE: botReply
+        }, authData);
+        
+        console.log(`✅ Тестовый ответ отправлен в диалог ${dialogId}`);
+      } catch (error) {
+        console.error('❌ Ошибка отправки ответа:', error);
+      }
+    }
+
+    // Всегда отвечаем 200 OK Битрикс24
+    return res.status(200).end();
+  }
+  
   // Для других событий пока просто отвечаем OK
   return res.status(200).json({ result: 'ok', event: event });
 }
