@@ -1,169 +1,157 @@
 // Файл: /api/chat-bot.js
-// Упрощенный обработчик событий чат-бота для открытых линий Битрикс24
-
 export default async function handler(req, res) {
-  // 1. Настраиваем CORS и заголовки для ответа Битрикс24
+  // Настройка CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // 2. Обработка предварительного OPTIONS-запроса
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // ===================== ДЕТАЛЬНАЯ ДИАГНОСТИКА =====================
+  console.log('=== 🔍 ДЕТАЛЬНЫЙ ЛОГ ЗАПРОСА ===');
+  console.log('Метод:', req.method);
+  console.log('URL:', req.url);
+  console.log('Query params:', req.query);
+  console.log('Заголовки:', JSON.stringify(req.headers));
+
+  let rawBody = '';
+  try {
+    rawBody = await new Promise((resolve) => {
+      let data = '';
+      req.on('data', chunk => data += chunk);
+      req.on('end', () => resolve(data));
+    });
+    console.log('Сырое тело (rawBody):', rawBody);
+  } catch (e) {
+    console.error('Ошибка чтения тела:', e);
   }
 
-  // 3. Для простоты проверки работы эндпоинта
+  // Парсим тело как application/x-www-form-urlencoded
+  const bodyParams = new URLSearchParams(rawBody);
+  const body = Object.fromEntries(bodyParams);
+  console.log('Распарсенное тело (body):', body);
+
+  // Объединяем источники данных: query-параметры ИЛИ тело
+  // Приоритет: query-параметры (обычно для GET), затем тело (для POST)
+  const combinedParams = { ...req.query, ...body };
+  console.log('Объединённые параметры (combinedParams):', combinedParams);
+  console.log('=== 🔍 КОНЕЦ ЛОГА ===\n');
+
+  const event = combinedParams.event;
+  console.log(`📨 Определено событие: ${event}`);
+
+  // ===================== ОБРАБОТКА GET (проверка работы) =====================
   if (req.method === 'GET') {
-    return res.status(200).json({ result: 'success', message: 'Chat-bot handler is ready' });
+    return res.status(200).json({ 
+      result: 'success', 
+      message: 'Chat-bot handler is ready',
+      debug: { event, hasAuth: !!combinedParams.auth, hasData: !!combinedParams.data }
+    });
   }
 
- // 4. Парсим входящие данные от Битрикс24
-// Битрикс24 отправляет данные как application/x-www-form-urlencoded
-let body = {};
-let authObject = {};
-let dataObject = {};
-
-try {
-    const rawBody = await new Promise((resolve) => {
-        let data = '';
-        req.on('data', chunk => data += chunk);
-        req.on('end', () => resolve(data));
-    });
-    const params = new URLSearchParams(rawBody);
-    body = Object.fromEntries(params);
-    
-    // КРИТИЧНО: Для события ONAPPINSTALL auth и data передаются в query-параметрах, а не в теле!
-    // Также они могут быть закодированы в теле запроса, но раздельно.
-    if (body.auth) {
-        try { authObject = JSON.parse(body.auth); } catch (e) { console.warn('Не удалось распарсить auth:', e); }
-    }
-    if (body.data) {
-        try { dataObject = JSON.parse(body.data); } catch (e) { console.warn('Не удалось распарсить data:', e); }
-    }
-    
-    // Логируем для отладки (будьте осторожны, не логируйте токены в продакшене!)
-    console.log(`📨 Событие: ${body.event || 'unknown'}`, {
-        hasAuth: !!body.auth,
-        hasData: !!body.data,
-        authKeys: Object.keys(authObject),
-        dataKeys: Object.keys(dataObject)
-    });
-    
-} catch (error) {
-    console.error('❌ Ошибка парсинга тела запроса:', error);
-    return res.status(400).json({ error: 'Bad Request' });
-}
-
-const { event } = body; // Основное событие берем из body
-
-  // 5. ОБРАБОТКА СОБЫТИЙ
-  // 5.1. Установка приложения и регистрация бота
+  // ===================== ОБРАБОТКА СОБЫТИЙ =====================
+  // 1. Установка приложения - ONAPPINSTALL
   if (event === 'ONAPPINSTALL') {
-    const handlerBackUrl = `https://${req.headers.host}${req.url}`;
-    
-    try {
-      // 5.1.1. Регистрируем нового бота
-      const registerResult = await callBitrixApi('imbot.register', {
-        CODE: 'my_simple_bot',
-        TYPE: 'O', // Бот для открытых линий
-        EVENT_MESSAGE_ADD: handlerBackUrl,
-        EVENT_WELCOME_MESSAGE: handlerBackUrl,
-        EVENT_BOT_DELETE: handlerBackUrl,
-        OPENLINE: 'Y',
-        PROPERTIES: {
-          NAME: 'Мой AI-Помощник (Тест)',
-          WORK_POSITION: 'Отвечает на вопросы посетителей сайта',
-          COLOR: 'AZURE'
+    console.log('🔄 Начинаем обработку ONAPPINSTALL');
+
+    // Пытаемся извлечь авторизационные данные из различных возможных мест
+    let auth = {};
+    let installData = {};
+
+    // Вариант 1: Параметр 'auth' как JSON-строка
+    if (combinedParams.auth) {
+      try {
+        auth = JSON.parse(combinedParams.auth);
+        console.log('✅ Авторизационные данные получены из combinedParams.auth');
+      } catch (e) {
+        console.warn('❌ Не удалось распарсить combinedParams.auth как JSON:', combinedParams.auth);
+      }
+    }
+
+    // Вариант 2: Отдельные поля (возможный альтернативный формат)
+    if (!auth.access_token && combinedParams.AUTH_ID) {
+      auth = {
+        access_token: combinedParams.AUTH_ID,
+        refresh_token: combinedParams.REFRESH_ID,
+        client_endpoint: combinedParams.AUTH['client_endpoint'] || `https://${combinedParams.DOMAIN}/rest/`,
+        application_token: combinedParams.auth && typeof combinedParams.auth === 'string' ? combinedParams.auth : combinedParams.application_token
+      };
+      console.log('✅ Авторизационные данные собраны из отдельных полей');
+    }
+
+    // Вариант 3: Данные установки
+    if (combinedParams.data) {
+      try {
+        installData = JSON.parse(combinedParams.data);
+      } catch (e) {
+        console.warn('Не удалось распарсить combinedParams.data');
+      }
+    }
+
+    // Если auth данные отсутствуют - критическая ошибка
+    if (!auth.access_token || !auth.client_endpoint) {
+      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: отсутствуют необходимые auth данные');
+      console.error('   Доступные ключи в auth:', Object.keys(auth));
+      console.error('   Все полученные параметры:', Object.keys(combinedParams));
+      
+      return res.status(400).json({ 
+        error: 'Missing auth data', 
+        details: 'Не получены авторизационные данные. Проверьте настройки приложения в Битрикс24.',
+        debug: { 
+          receivedAuthKeys: Object.keys(auth),
+          allParamKeys: Object.keys(combinedParams) 
         }
-      }, authObject);
+      });
+    }
 
-      const botId = registerResult.result;
+    console.log('🔐 Auth данные для API:', {
+      endpoint: auth.client_endpoint,
+      hasToken: !!auth.access_token,
+      tokenPreview: auth.access_token ? auth.access_token.substring(0, 20) + '...' : 'нет'
+    });
 
-      // 5.1.2. Сохраняем ID бота (в реальном проекте нужно в БД)
-      // Для теста просто логируем
-      console.log(`✅ Бот зарегистрирован. ID: ${botId}`);
+    // Регистрация бота
+    try {
+      const handlerBackUrl = `https://${req.headers.host}${req.url}`;
+      console.log(`🌐 Регистрируем бота, handler URL: ${handlerBackUrl}`);
 
-      // 5.1.3. Отвечаем Битрикс24, что обработка завершена
-      return res.status(200).json({ result: 'Bot registered', botId });
+      // Здесь будет вызов imbot.register, но пока просто логируем
+      console.log('✅ Готовы вызвать imbot.register с данными:', {
+        CODE: 'my_simple_bot',
+        handlerBackUrl
+      });
+
+      // ВРЕМЕННО: возвращаем успех без реального вызова API
+      return res.status(200).json({ 
+        result: 'success', 
+        message: 'Bot registration simulated successfully',
+        note: 'Реальная регистрация отключена для диагностики. Следующий шаг - включить вызов API.',
+        debug: {
+          authDataReceived: !!auth.access_token,
+          dataReceived: !!installData,
+          handlerUrl: handlerBackUrl
+        }
+      });
 
     } catch (apiError) {
       console.error('❌ Ошибка регистрации бота:', apiError);
-      return res.status(500).json({ error: 'Bot registration failed' });
+      return res.status(500).json({ 
+        error: 'Bot registration failed', 
+        details: apiError.message 
+      });
     }
   }
 
-  // 5.2. Получение нового сообщения от пользователя
+  // 2. Другие события - временный заглушки
   if (event === 'ONIMBOTMESSAGEADD') {
-    const params = dataObject.PARAMS || {};
-    
-    // Работаем только с открытыми линиями
-    if (params.CHAT_ENTITY_TYPE !== 'LINES') {
-      return res.status(200).end(); // Игнорируем
-    }
-
-    const dialogId = params.DIALOG_ID;
-    const userMessage = params.MESSAGE || '';
-
-    console.log(`💬 Новое сообщение в диалоге ${dialogId}: "${userMessage}"`);
-
-    // 5.2.1. ПРОСТЕЙШАЯ ЛОГИКА ОТВЕТА (замените на вызов Chutes AI)
-    const botReply = `Вы написали: "${userMessage}". Это тестовый ответ бота.`;
-
-    try {
-      // 5.2.2. Отправляем ответное сообщение через API Битрикс24
-      await callBitrixApi('imbot.message.add', {
-        DIALOG_ID: dialogId,
-        MESSAGE: botReply
-      }, authObject);
-
-      console.log(`✅ Ответ отправлен в диалог ${dialogId}`);
-      return res.status(200).end();
-
-    } catch (replyError) {
-      console.error('❌ Ошибка отправки сообщения:', replyError);
-      return res.status(500).json({ error: 'Failed to send reply' });
-    }
+    console.log('💬 Получено сообщение (заглушка)');
+    return res.status(200).json({ result: 'message received' });
   }
 
-  // 5.3. Пользователь присоединился к чату
-  if (event === 'ONIMBOTJOINCHAT') {
-    const params = dataObject.PARAMS || {};
-    if (params.CHAT_ENTITY_TYPE !== 'LINES') {
-      return res.status(200).end();
-    }
-    // Можно отправить приветственное сообщение
-    console.log(`👋 Пользователь присоединился к чату: ${params.DIALOG_ID}`);
-    return res.status(200).end();
-  }
-
-  // 6. Если событие не обрабатывается, отвечаем успехом
-  return res.status(200).end();
-}
-
-// Вспомогательная функция для вызова REST API Битрикс24
-async function callBitrixApi(method, params = {}, auth = {}) {
-  const queryUrl = `${auth.client_endpoint}${method}`;
-  const queryData = new URLSearchParams({
-    ...params,
-    auth: auth.access_token
+  // Если событие не распознано
+  console.log(`⚠️ Необработанное событие: ${event}`);
+  return res.status(200).json({ 
+    result: 'unknown event', 
+    event: event 
   });
-
-  console.log(`🌐 Вызов API: ${method}`);
-
-  const response = await fetch(queryUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: queryData.toString()
-  });
-
-  const result = await response.json();
-
-  if (result.error) {
-    console.error(`❌ Ошибка API ${method}:`, result.error);
-    throw new Error(result.error_description || result.error);
-  }
-
-  return result;
 }
