@@ -64,20 +64,18 @@ export default async function handler(req, res) {
       const handlerBackUrl = `https://${req.headers.host}${req.url}`;
       console.log(`🌐 URL обработчика: ${handlerBackUrl}`);
 
-      // 2. Регистрируем бота через API Битрикс24
-      const registerResult = await callBitrixApi('imbot.register', {
-        CODE: 'ai_site_helper',
-        TYPE: 'O', // Бот для открытых линий
-        EVENT_MESSAGE_ADD: handlerBackUrl,
-        EVENT_WELCOME_MESSAGE: handlerBackUrl,
-        EVENT_BOT_DELETE: handlerBackUrl,
-        OPENLINE: 'Y',
-        PROPERTIES: {
-          NAME: 'AI Помощник для сайта',
-          WORK_POSITION: 'Отвечает на вопросы посетителей сайта',
-          COLOR: 'GREEN'
-        }
-      }, authData);
+     // 2. Регистрируем бота через API Битрикс24
+const registerResult = await callBitrixApi('imbot.register', {
+  CODE: 'ai_site_helper',
+  TYPE: 'O', // Бот для открытых линий
+  EVENT_MESSAGE_ADD: handlerBackUrl,
+  EVENT_WELCOME_MESSAGE: handlerBackUrl,
+  EVENT_BOT_DELETE: handlerBackUrl,
+  OPENLINE: 'Y',
+  NAME: 'AI Помощник для сайта',      // Прямой параметр
+  WORK_POSITION: 'Отвечает на вопросы посетителей сайта', // Прямой параметр
+  COLOR: 'GREEN'                       // Прямой параметр
+}, authData);
 
       const botId = registerResult.result;
       console.log(`✅ Бот зарегистрирован! ID: ${botId}`);
@@ -104,37 +102,48 @@ export default async function handler(req, res) {
   return res.status(200).json({ result: 'ok', event: event });
 }
 
-// Вспомогательная функция для вызова API Битрикс24
+// Улучшенная функция для вызова API Битрикс24
 async function callBitrixApi(method, params, auth) {
   const queryUrl = `${auth.client_endpoint}${method}`;
   
-  // Подготавливаем параметры
-  const queryParams = new URLSearchParams();
-  queryParams.append('auth', auth.access_token);
+  // Создаём FormData-подобную структуру для PHP-стиля массивов
+  const formData = new URLSearchParams();
+  formData.append('auth', auth.access_token);
   
-  // Добавляем остальные параметры
-  Object.keys(params).forEach(key => {
-    if (typeof params[key] === 'object') {
-      queryParams.append(key, JSON.stringify(params[key]));
+  // Рекурсивно добавляем параметры с поддержкой вложенных объектов
+  function appendParam(key, value, prefix = '') {
+    const fullKey = prefix ? `${prefix}[${key}]` : key;
+    
+    if (typeof value === 'object' && value !== null) {
+      // Рекурсивно обрабатываем вложенные объекты
+      Object.entries(value).forEach(([subKey, subValue]) => {
+        appendParam(subKey, subValue, fullKey);
+      });
     } else {
-      queryParams.append(key, params[key]);
+      formData.append(fullKey, String(value));
     }
+  }
+  
+  // Добавляем все параметры
+  Object.entries(params).forEach(([key, value]) => {
+    appendParam(key, value);
   });
-
+  
   console.log(`🌐 Вызов API: ${method} на ${auth.client_endpoint}`);
+  console.log(`📤 Параметры (первые 500 символов): ${formData.toString().substring(0, 500)}...`);
 
   const response = await fetch(queryUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: queryParams.toString()
+    body: formData.toString()
   });
 
   const result = await response.json();
   
   if (result.error) {
-    console.error(`Ошибка API ${method}:`, result);
+    console.error(`❌ Ошибка API ${method}:`, result);
     throw new Error(result.error_description || result.error);
   }
 
