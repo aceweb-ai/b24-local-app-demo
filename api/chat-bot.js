@@ -64,7 +64,7 @@ export default async function handler(req, res) {
       const handlerBackUrl = `https://${req.headers.host}${req.url}`;
       console.log(`🌐 URL обработчика: ${handlerBackUrl}`);
 
-     // 2. Регистрируем бота через API Битрикс24
+    // 2. Регистрируем бота через API Битрикс24 с ПРАВИЛЬНОЙ структурой
 const registerResult = await callBitrixApi('imbot.register', {
   CODE: 'ai_site_helper',
   TYPE: 'O', // Бот для открытых линий
@@ -72,9 +72,11 @@ const registerResult = await callBitrixApi('imbot.register', {
   EVENT_WELCOME_MESSAGE: handlerBackUrl,
   EVENT_BOT_DELETE: handlerBackUrl,
   OPENLINE: 'Y',
-  NAME: 'AI Помощник для сайта',      // Прямой параметр
-  WORK_POSITION: 'Отвечает на вопросы посетителей сайта', // Прямой параметр
-  COLOR: 'GREEN'                       // Прямой параметр
+  PROPERTIES: {
+    NAME: 'AI Помощник для сайта',
+    COLOR: 'GREEN',
+    WORK_POSITION: 'Отвечает на вопросы посетителей сайта'
+  }
 }, authData);
 
       const botId = registerResult.result;
