@@ -1,237 +1,151 @@
 // Файл: /api/chat-bot.js
-// Чат-бот для Открытых линий Битрикс24
+// Упрощенный обработчик событий чат-бота для открытых линий Битрикс24
 
 export default async function handler(req, res) {
-  // 1. Настраиваем CORS
+  // 1. Настраиваем CORS и заголовки для ответа Битрикс24
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // 2. Обработка предварительного запроса OPTIONS
+  // 2. Обработка предварительного OPTIONS-запроса
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // 3. Парсим входящие данные
-  let requestData = {};
+  // 3. Для простоты проверки работы эндпоинта
+  if (req.method === 'GET') {
+    return res.status(200).json({ result: 'success', message: 'Chat-bot handler is ready' });
+  }
+
+  // 4. Парсим входящие данные от Битрикс24
+  // Битрикс24 отправляет данные как application/x-www-form-urlencoded
+  let body = {};
   try {
-    // Битрикс24 отправляет данные как x-www-form-urlencoded
-    if (req.method === 'POST') {
-      const text = await new Promise((resolve) => {
-        let data = '';
-        req.on('data', chunk => data += chunk);
-        req.on('end', () => resolve(data));
-      });
-      
-      const params = new URLSearchParams(text);
-      requestData = Object.fromEntries(params);
-      
-      // Парсим JSON поля если они есть
-      if (requestData.auth) requestData.auth = JSON.parse(requestData.auth);
-      if (requestData.data) requestData.data = JSON.parse(requestData.data);
-    }
+    const rawBody = await new Promise((resolve) => {
+      let data = '';
+      req.on('data', chunk => data += chunk);
+      req.on('end', () => resolve(data));
+    });
+    const params = new URLSearchParams(rawBody);
+    body = Object.fromEntries(params);
   } catch (error) {
-    console.error('❌ Ошибка парсинга:', error);
-    return res.status(400).json({ error: 'Invalid request format' });
+    console.error('❌ Ошибка парсинга тела запроса:', error);
+    return res.status(400).json({ error: 'Bad Request' });
   }
 
-  console.log('📨 Событие:', requestData.event);
+  const { event, auth, data } = body;
+  const authObject = auth ? JSON.parse(auth) : {};
+  const dataObject = data ? JSON.parse(data) : {};
 
-  // 4. Обрабатываем события
-  switch (requestData.event) {
-    case 'ONAPPINSTALL':
-      return await handleAppInstall(requestData, res);
-    case 'ONIMBOTMESSAGEADD':
-      return await handleMessageAdd(requestData, res);
-    case 'ONIMBOTJOINCHAT':
-      return await handleJoinChat(requestData, res);
-    case 'ONIMBOTDELETE':
-      return await handleBotDelete(requestData, res);
-    default:
-      return res.status(200).json({ 
-        result: 'success', 
-        message: 'Handler is ready' 
-      });
-  }
-}
+  console.log(`📨 Событие от Битрикс24: ${event}`, { authObject, dataObject });
 
-// ============= ОБРАБОТЧИКИ СОБЫТИЙ =============
-
-/**
- * Установка приложения и регистрация бота
- */
-async function handleAppInstall(requestData, res) {
-  const { auth } = requestData;
-  
-  try {
-    // URL нашего обработчика
-    const handlerUrl = `https://${req.headers.host}${req.url}`;
+  // 5. ОБРАБОТКА СОБЫТИЙ
+  // 5.1. Установка приложения и регистрация бота
+  if (event === 'ONAPPINSTALL') {
+    const handlerBackUrl = `https://${req.headers.host}${req.url}`;
     
-    // Регистрируем бота для Открытых линий
-    const result = await restCommand('imbot.register', {
-      CODE: 'OpenlineTestBot',
-      TYPE: 'O', // 'O' для Открытых линий, 'B' для обычного бота
-      EVENT_MESSAGE_ADD: handlerUrl,
-      EVENT_WELCOME_MESSAGE: handlerUrl,
-      EVENT_BOT_DELETE: handlerUrl,
-      PROPERTIES: {
-        NAME: 'Тестовый AI Бот',
-        COLOR: 'AQUA',
-        EMAIL: 'bot@example.com',
-        PERSONAL_BIRTHDAY: '2024-01-01',
-        WORK_POSITION: 'Тестовый бот с AI для открытых линий',
-        PERSONAL_GENDER: 'M',
-        PERSONAL_PHOTO: '' // Можно добавить base64 аватар
-      }
-    }, auth);
+    try {
+      // 5.1.1. Регистрируем нового бота
+      const registerResult = await callBitrixApi('imbot.register', {
+        CODE: 'my_simple_bot',
+        TYPE: 'O', // Бот для открытых линий
+        EVENT_MESSAGE_ADD: handlerBackUrl,
+        EVENT_WELCOME_MESSAGE: handlerBackUrl,
+        EVENT_BOT_DELETE: handlerBackUrl,
+        OPENLINE: 'Y',
+        PROPERTIES: {
+          NAME: 'Мой AI-Помощник (Тест)',
+          WORK_POSITION: 'Отвечает на вопросы посетителей сайта',
+          COLOR: 'AZURE'
+        }
+      }, authObject);
 
-    console.log('✅ Бот зарегистрирован:', result);
+      const botId = registerResult.result;
 
-    // Сохраняем ID бота (в реальном приложении - в БД)
-    if (result.result) {
-      // Здесь можно сохранить bot_id для будущего использования
-      console.log('Bot ID сохранен:', result.result);
+      // 5.1.2. Сохраняем ID бота (в реальном проекте нужно в БД)
+      // Для теста просто логируем
+      console.log(`✅ Бот зарегистрирован. ID: ${botId}`);
+
+      // 5.1.3. Отвечаем Битрикс24, что обработка завершена
+      return res.status(200).json({ result: 'Bot registered', botId });
+
+    } catch (apiError) {
+      console.error('❌ Ошибка регистрации бота:', apiError);
+      return res.status(500).json({ error: 'Bot registration failed' });
+    }
+  }
+
+  // 5.2. Получение нового сообщения от пользователя
+  if (event === 'ONIMBOTMESSAGEADD') {
+    const params = dataObject.PARAMS || {};
+    
+    // Работаем только с открытыми линиями
+    if (params.CHAT_ENTITY_TYPE !== 'LINES') {
+      return res.status(200).end(); // Игнорируем
     }
 
-    return res.status(200).json({
-      result: 'success',
-      message: 'Bot registered successfully',
-      bot_id: result.result
-    });
+    const dialogId = params.DIALOG_ID;
+    const userMessage = params.MESSAGE || '';
 
-  } catch (error) {
-    console.error('❌ Ошибка регистрации:', error);
-    return res.status(500).json({ error: 'Registration failed' });
-  }
-}
+    console.log(`💬 Новое сообщение в диалоге ${dialogId}: "${userMessage}"`);
 
-/**
- * Обработка входящих сообщений
- */
-async function handleMessageAdd(requestData, res) {
-  const { auth, data } = requestData;
-  
-  try {
-    const { DIALOG_ID, MESSAGE, CHAT_ENTITY_TYPE } = data;
-    
-    // Проверяем, из открытой линии ли сообщение
-    const isOpenline = CHAT_ENTITY_TYPE === 'LINES';
-    console.log(`💬 Сообщение от ${isOpenline ? 'открытой линии' : 'чата'}: "${MESSAGE}"`);
+    // 5.2.1. ПРОСТЕЙШАЯ ЛОГИКА ОТВЕТА (замените на вызов Chutes AI)
+    const botReply = `Вы написали: "${userMessage}". Это тестовый ответ бота.`;
 
-    // ТЕСТОВЫЙ ОТВЕТ (позже заменим на AI)
-    let responseMessage = '';
-    
-    if (MESSAGE.toLowerCase() === 'привет') {
-      responseMessage = 'Привет! Я тестовый бот для открытых линий. Напишите "меню" для выбора команд.';
-    } else if (MESSAGE.toLowerCase() === 'меню') {
-      responseMessage = 'Доступные команды:\n1. Привет - поздороваться\n2. Время - текущее время\n3. Помощь - помощь\n0. Оператор - связаться с оператором';
-    } else if (MESSAGE.toLowerCase() === 'время') {
-      responseMessage = `Текущее время: ${new Date().toLocaleString('ru-RU')}`;
-    } else if (MESSAGE === '0') {
-      // Стандартная команда для переключения на оператора
-      responseMessage = 'Соединяю с оператором...';
-    } else {
-      // Эхо-ответ для теста
-      responseMessage = `Вы написали: "${MESSAGE}". Это тестовый ответ бота.`;
+    try {
+      // 5.2.2. Отправляем ответное сообщение через API Битрикс24
+      await callBitrixApi('imbot.message.add', {
+        DIALOG_ID: dialogId,
+        MESSAGE: botReply
+      }, authObject);
+
+      console.log(`✅ Ответ отправлен в диалог ${dialogId}`);
+      return res.status(200).end();
+
+    } catch (replyError) {
+      console.error('❌ Ошибка отправки сообщения:', replyError);
+      return res.status(500).json({ error: 'Failed to send reply' });
     }
-
-    // Отправляем ответ
-    const result = await restCommand('imbot.message.add', {
-      DIALOG_ID: DIALOG_ID,
-      MESSAGE: responseMessage,
-      ATTACH: isOpenline ? [
-        { MESSAGE: '[send=меню]Меню[/send] | [send=0]Оператор[/send]' }
-      ] : []
-    }, auth);
-
-    console.log('✅ Ответ отправлен:', result);
-
-    return res.status(200).json({
-      result: 'success',
-      message: 'Message processed'
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка обработки сообщения:', error);
-    return res.status(500).json({ error: 'Message processing failed' });
   }
-}
 
-/**
- * Приглашение бота в чат
- */
-async function handleJoinChat(requestData, res) {
-  const { auth, data } = requestData;
-  
-  try {
-    const { DIALOG_ID, CHAT_ENTITY_TYPE } = data;
-    const isOpenline = CHAT_ENTITY_TYPE === 'LINES';
-
-    let welcomeMessage = isOpenline 
-      ? 'Здравствуйте! Я тестовый бот для открытых линий. Чем могу помочь?'
-      : 'Привет! Я тестовый бот. Напишите "меню" для списка команд.';
-
-    const result = await restCommand('imbot.message.add', {
-      DIALOG_ID: DIALOG_ID,
-      MESSAGE: welcomeMessage,
-      ATTACH: [
-        { MESSAGE: '[send=меню]Меню[/send] | [send=привет]Привет[/send]' }
-      ]
-    }, auth);
-
-    console.log('✅ Приветствие отправлено');
-
-    return res.status(200).json({
-      result: 'success',
-      message: 'Welcome message sent'
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка приветствия:', error);
-    return res.status(500).json({ error: 'Welcome failed' });
+  // 5.3. Пользователь присоединился к чату
+  if (event === 'ONIMBOTJOINCHAT') {
+    const params = dataObject.PARAMS || {};
+    if (params.CHAT_ENTITY_TYPE !== 'LINES') {
+      return res.status(200).end();
+    }
+    // Можно отправить приветственное сообщение
+    console.log(`👋 Пользователь присоединился к чату: ${params.DIALOG_ID}`);
+    return res.status(200).end();
   }
+
+  // 6. Если событие не обрабатывается, отвечаем успехом
+  return res.status(200).end();
 }
 
-/**
- * Удаление бота
- */
-async function handleBotDelete(requestData, res) {
-  console.log('🗑️ Бот удален');
-  // Здесь можно выполнить очистку данных
-  return res.status(200).json({
-    result: 'success',
-    message: 'Bot deleted'
-  });
-}
-
-// ============= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =============
-
-/**
- * Отправка REST-запроса к Битрикс24
- */
-async function restCommand(method, params, auth) {
-  const queryUrl = `https://${auth.domain}/rest/${method}`;
+// Вспомогательная функция для вызова REST API Битрикс24
+async function callBitrixApi(method, params = {}, auth = {}) {
+  const queryUrl = `${auth.client_endpoint}${method}`;
   const queryData = new URLSearchParams({
     ...params,
     auth: auth.access_token
-  }).toString();
+  });
 
-  console.log(`🔄 REST: ${method}`);
+  console.log(`🌐 Вызов API: ${method}`);
 
   const response = await fetch(queryUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Openline-Bot-Handler'
     },
-    body: queryData
+    body: queryData.toString()
   });
 
   const result = await response.json();
-  
+
   if (result.error) {
-    console.error(`❌ REST ошибка (${method}):`, result.error);
-    throw new Error(result.error_description || 'REST command failed');
+    console.error(`❌ Ошибка API ${method}:`, result.error);
+    throw new Error(result.error_description || result.error);
   }
 
   return result;
