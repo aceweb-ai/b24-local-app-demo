@@ -50,7 +50,7 @@ export default async function handler(req, res) {
 
   // ОБРАБОТКА ONAPPINSTALL
   if (event === 'ONAPPINSTALL') {
-    console.log('🔄 Начинаем регистрацию бота...');
+    console.log('🔄 Начинаем регистрацию чат-бота...');
 
     if (!authData.access_token || !authData.client_endpoint) {
       console.error('❌ Нет токена или endpoint:', authData);
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
       }, authData);
 
       const botId = registerResult.result;
-      console.log(`✅ Бот зарегистрирован! ID: ${botId}`);
+      console.log(`✅ Чат-бот зарегистрирован! ID: ${botId}`);
 
       return res.status(200).json({
         result: 'success',
