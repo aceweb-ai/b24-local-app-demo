@@ -1,5 +1,5 @@
 // Файл: /api/chat-bot.js
-// РАБОЧИЙ код для регистрации чат-бота
+// ПОЛНЫЙ рабочий код чат-бота для открытой линии Битрикс24
 
 export default async function handler(req, res) {
   // Настройка CORS
@@ -28,28 +28,22 @@ export default async function handler(req, res) {
   const params = new URLSearchParams(rawBody);
   const body = Object.fromEntries(params);
 
-  // Преобразуем PHP-стиль массивов в объекты
+  // Извлекаем event и базовые данные
   const event = body.event;
   
-  // Извлекаем auth данные
+  // ИЗВЛЕКАЕМ AUTH ДАННЫЕ (правильно парсим PHP-стиль)
   const authData = {};
-  const dataObj = {};
-  
   Object.keys(body).forEach(key => {
     if (key.startsWith('auth[')) {
       const match = key.match(/auth\[([^\]]+)\]/);
       if (match) authData[match[1]] = body[key];
-    } else if (key.startsWith('data[')) {
-      const match = key.match(/data\[([^\]]+)\]/);
-      if (match) dataObj[match[1]] = body[key];
     }
   });
 
   console.log(`🔍 Событие: ${event}`);
   console.log('🔐 Auth данные:', Object.keys(authData));
-  console.log('📊 Data данные:', dataObj);
 
-  // ОБРАБОТКА ONAPPINSTALL
+  // === 1. ОБРАБОТКА УСТАНОВКИ ПРИЛОЖЕНИЯ (ONAPPINSTALL) ===
   if (event === 'ONAPPINSTALL') {
     console.log('🔄 Начинаем регистрацию бота...');
 
@@ -60,30 +54,27 @@ export default async function handler(req, res) {
     }
 
     try {
-      // 1. Формируем URL для обработчика
+      // Формируем URL для обработчика
       const handlerBackUrl = `https://${req.headers.host}${req.url}`;
       console.log(`🌐 URL обработчика: ${handlerBackUrl}`);
 
-// 2. Регистрируем бота через API Битрикс24 с ПРАВИЛЬНОЙ структурой
-const registerResult = await callBitrixApi('imbot.register', {
-  CODE: 'ai_site_helper',
-  TYPE: 'O', // Бот для открытых линий
-  EVENT_MESSAGE_ADD: handlerBackUrl,
-  EVENT_WELCOME_MESSAGE: handlerBackUrl,
-  EVENT_BOT_DELETE: handlerBackUrl,
-  OPENLINE: 'Y',
-  PROPERTIES: {
-    NAME: 'AI Помощник для сайта',
-    COLOR: 'GREEN',
-    WORK_POSITION: 'Отвечает на вопросы посетителей сайта'
-  }
-}, authData);
+      // Регистрируем бота через API Битрикс24
+      const registerResult = await callBitrixApi('imbot.register', {
+        CODE: 'ai_site_helper',
+        TYPE: 'O', // Бот для открытых линий
+        EVENT_MESSAGE_ADD: handlerBackUrl,
+        EVENT_WELCOME_MESSAGE: handlerBackUrl,
+        EVENT_BOT_DELETE: handlerBackUrl,
+        OPENLINE: 'Y',
+        PROPERTIES: {
+          NAME: 'AI Помощник для сайта',
+          COLOR: 'GREEN',
+          WORK_POSITION: 'Отвечает на вопросы посетителей сайта'
+        }
+      }, authData);
 
       const botId = registerResult.result;
       console.log(`✅ Бот зарегистрирован! ID: ${botId}`);
-
-      // 3. Сохраняем ID бота (в реальном проекте - в БД)
-      // Пока просто возвращаем успех
 
       return res.status(200).json({
         result: 'success',
@@ -100,67 +91,94 @@ const registerResult = await callBitrixApi('imbot.register', {
     }
   }
 
-  // ========== ОБРАБОТКА СОБЫТИЯ: НОВОЕ СООБЩЕНИЕ ОТ ПОЛЬЗОВАТЕЛЯ ==========
+  // === 2. ОБРАБОТКА ПРИСОЕДИНЕНИЯ ПОЛЬЗОВАТЕЛЯ К ЧАТУ ===
+  if (event === 'ONIMBOTJOINCHAT') {
+    console.log('👋 Пользователь присоединился к чату');
+    
+    // ИЗВЛЕКАЕМ ДАННЫЕ ДЛЯ ЭТОГО СОБЫТИЯ
+    const joinData = {};
+    Object.keys(body).forEach(key => {
+      if (key.startsWith('data[')) {
+        const match = key.match(/data\[([^\]]+)\]/);
+        if (match) joinData[match[1]] = body[key];
+      }
+    });
+    
+    console.log('📊 Данные присоединения:', joinData);
+    
+    // Можно отправить приветственное сообщение
+    // const dialogId = joinData['PARAMS[DIALOG_ID]'];
+    // if (dialogId && authData.access_token) {
+    //   await callBitrixApi('imbot.message.add', {
+    //     DIALOG_ID: dialogId,
+    //     MESSAGE: 'Добро пожаловать! Чем могу помочь?'
+    //   }, authData);
+    // }
+    
+    return res.status(200).end();
+  }
+
+  // === 3. ОБРАБОТКА НОВЫХ СООБЩЕНИЙ ОТ ПОЛЬЗОВАТЕЛЕЙ ===
   if (event === 'ONIMBOTMESSAGEADD') {
     console.log('💬 Получено новое сообщение от пользователя');
-
-    // 1. ПРАВИЛЬНО ИЗВЛЕКАЕМ ПАРАМЕТРЫ СООБЩЕНИЯ
-    // Битрикс24 присылает данные в формате data[PARAMS][FIELD_NAME]
+    
+    // ИЗВЛЕКАЕМ ВЛОЖЕННЫЕ ПАРАМЕТРЫ data[PARAMS][...]
     const messageParams = {};
     Object.keys(body).forEach(key => {
       // Ищем ключи вида data[PARAMS][DIALOG_ID], data[PARAMS][MESSAGE] и т.д.
-      const match = key.match(/^data\[PARAMS\]\[([^\]]+)\]$/);
+      const match = key.match(/data\[PARAMS\]\[([^\]]+)\]/);
       if (match) {
         messageParams[match[1]] = body[key];
       }
     });
-
+    
+    console.log('📩 Параметры сообщения:', messageParams);
+    
     const dialogId = messageParams.DIALOG_ID;
-    const userMessage = messageParams.MESSAGE;
-    const fromUserId = messageParams.FROM_USER_ID;
-
-    console.log(`📩 Параметры сообщения:`, {
-      dialogId,
-      userMessage: userMessage ? `"${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}"` : 'нет',
-      fromUserId
-    });
-
-    // 2. ПРОВЕРЯЕМ, ЧТО ЭТО СООБЩЕНИЕ ИЗ ОТКРЫТОЙ ЛИНИИ
-    if (messageParams.CHAT_ENTITY_TYPE !== 'LINES') {
-      console.log('⚠️ Не открытая линия, игнорируем');
+    const message = messageParams.MESSAGE;
+    const chatEntityType = messageParams.CHAT_ENTITY_TYPE;
+    
+    // Работаем только с открытыми линиями
+    if (chatEntityType !== 'LINES') {
+      console.log('⚠️ Игнорируем сообщение не из открытой линии');
       return res.status(200).end();
     }
-
-    // 3. ОТПРАВЛЯЕМ ПРОСТОЙ ТЕСТОВЫЙ ОТВЕТ
-    if (dialogId && userMessage && authData.access_token) {
-      try {
-        const botReply = `Бот получил ваше сообщение: "${userMessage}". Работа над ответом...`;
-        
-        // Вызываем API Битрикс24 для отправки ответа
-        await callBitrixApi('imbot.message.add', {
-          DIALOG_ID: dialogId,
-          MESSAGE: botReply
-        }, authData);
-        
-        console.log(`✅ Тестовый ответ отправлен в диалог ${dialogId}`);
-      } catch (error) {
-        console.error('❌ Ошибка отправки ответа:', error);
-      }
+    
+    if (!dialogId || !message) {
+      console.error('❌ Не удалось извлечь DIALOG_ID или MESSAGE');
+      return res.status(200).end(); // Всегда отвечаем 200 OK Битрикс24
     }
-
-    // Всегда отвечаем 200 OK Битрикс24
+    
+    console.log(`📩 Диалог: ${dialogId}, Сообщение: "${message}"`);
+    
+    try {
+      // ОТПРАВЛЯЕМ ОТВЕТ ПОЛЬЗОВАТЕЛЮ
+      const botReply = `Вы написали: "${message}". Это тестовый ответ бота.`;
+      
+      await callBitrixApi('imbot.message.add', {
+        DIALOG_ID: dialogId,
+        MESSAGE: botReply
+      }, authData);
+      
+      console.log(`✅ Ответ отправлен в диалог ${dialogId}`);
+      
+    } catch (error) {
+      console.error('❌ Ошибка отправки ответа:', error);
+    }
+    
     return res.status(200).end();
   }
-  
-  // Для других событий пока просто отвечаем OK
+
+  // === 4. ДЛЯ ВСЕХ ОСТАЛЬНЫХ СОБЫТИЙ ===
+  console.log(`ℹ️ Необрабатываемое событие: ${event}`);
   return res.status(200).json({ result: 'ok', event: event });
 }
 
-// Улучшенная функция для вызова API Битрикс24
+// ===================== ФУНКЦИЯ ДЛЯ ВЫЗОВА API БИТРИКС24 =====================
 async function callBitrixApi(method, params, auth) {
   const queryUrl = `${auth.client_endpoint}${method}`;
   
-  // Создаём FormData-подобную структуру для PHP-стиля массивов
+  // Создаём FormData-подобную структуру
   const formData = new URLSearchParams();
   formData.append('auth', auth.access_token);
   
@@ -169,7 +187,6 @@ async function callBitrixApi(method, params, auth) {
     const fullKey = prefix ? `${prefix}[${key}]` : key;
     
     if (typeof value === 'object' && value !== null) {
-      // Рекурсивно обрабатываем вложенные объекты
       Object.entries(value).forEach(([subKey, subValue]) => {
         appendParam(subKey, subValue, fullKey);
       });
@@ -178,13 +195,11 @@ async function callBitrixApi(method, params, auth) {
     }
   }
   
-  // Добавляем все параметры
   Object.entries(params).forEach(([key, value]) => {
     appendParam(key, value);
   });
   
   console.log(`🌐 Вызов API: ${method} на ${auth.client_endpoint}`);
-  console.log(`📤 Параметры (первые 500 символов): ${formData.toString().substring(0, 500)}...`);
 
   const response = await fetch(queryUrl, {
     method: 'POST',
