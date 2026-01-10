@@ -17,27 +17,44 @@ export default async function handler(req, res) {
     return res.status(200).json({ result: 'success', message: 'Chat-bot handler is ready' });
   }
 
-  // 4. Парсим входящие данные от Битрикс24
-  // Битрикс24 отправляет данные как application/x-www-form-urlencoded
-  let body = {};
-  try {
+ // 4. Парсим входящие данные от Битрикс24
+// Битрикс24 отправляет данные как application/x-www-form-urlencoded
+let body = {};
+let authObject = {};
+let dataObject = {};
+
+try {
     const rawBody = await new Promise((resolve) => {
-      let data = '';
-      req.on('data', chunk => data += chunk);
-      req.on('end', () => resolve(data));
+        let data = '';
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => resolve(data));
     });
     const params = new URLSearchParams(rawBody);
     body = Object.fromEntries(params);
-  } catch (error) {
+    
+    // КРИТИЧНО: Для события ONAPPINSTALL auth и data передаются в query-параметрах, а не в теле!
+    // Также они могут быть закодированы в теле запроса, но раздельно.
+    if (body.auth) {
+        try { authObject = JSON.parse(body.auth); } catch (e) { console.warn('Не удалось распарсить auth:', e); }
+    }
+    if (body.data) {
+        try { dataObject = JSON.parse(body.data); } catch (e) { console.warn('Не удалось распарсить data:', e); }
+    }
+    
+    // Логируем для отладки (будьте осторожны, не логируйте токены в продакшене!)
+    console.log(`📨 Событие: ${body.event || 'unknown'}`, {
+        hasAuth: !!body.auth,
+        hasData: !!body.data,
+        authKeys: Object.keys(authObject),
+        dataKeys: Object.keys(dataObject)
+    });
+    
+} catch (error) {
     console.error('❌ Ошибка парсинга тела запроса:', error);
     return res.status(400).json({ error: 'Bad Request' });
-  }
+}
 
-  const { event, auth, data } = body;
-  const authObject = auth ? JSON.parse(auth) : {};
-  const dataObject = data ? JSON.parse(data) : {};
-
-  console.log(`📨 Событие от Битрикс24: ${event}`, { authObject, dataObject });
+const { event } = body; // Основное событие берем из body
 
   // 5. ОБРАБОТКА СОБЫТИЙ
   // 5.1. Установка приложения и регистрация бота
